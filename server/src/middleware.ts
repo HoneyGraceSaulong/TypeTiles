@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import { verifyToken, JWTPayload } from "./auth.js";
+import { verifyToken, JWTPayload, normalizeRole } from "./auth.js";
+import { getDatabase } from "./db.js";
 
 declare global {
   namespace Express {
@@ -9,7 +10,7 @@ declare global {
   }
 }
 
-export function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader?.startsWith("Bearer ")) {
@@ -23,8 +24,25 @@ export function authMiddleware(req: Request, res: Response, next: NextFunction) 
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 
-  req.user = payload;
-  next();
+  try {
+    const user = await getDatabase().get(
+      "SELECT id, username, role, is_banned FROM users WHERE id = ?",
+      [payload.userId],
+    );
+
+    if (!user || user.is_banned) {
+      return res.status(401).json({ error: "Invalid or inactive account" });
+    }
+
+    req.user = {
+      userId: user.id,
+      username: user.username,
+      role: normalizeRole(user.role),
+    };
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 export function adminMiddleware(req: Request, res: Response, next: NextFunction) {
@@ -32,4 +50,13 @@ export function adminMiddleware(req: Request, res: Response, next: NextFunction)
     return res.status(403).json({ error: "Admin access required" });
   }
   next();
+}
+
+export function roleMiddleware(...roles: Array<"student" | "teacher" | "admin">) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.includes(req.user.role as "student" | "teacher" | "admin")) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    next();
+  };
 }

@@ -13,10 +13,16 @@ const app = express();
 const httpServer = createServer(app);
 const lanServer = attachLanServer(httpServer);
 const PORT = Number(process.env.PORT || 3001);
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  process.env.CLIENT_URL,
+  ...(process.env.CLIENT_ORIGINS?.split(",").map((origin) => origin.trim()) || []),
+].filter((origin): origin is string => Boolean(origin));
 
 // Middleware
 app.use(cors({
-  origin: process.env.CLIENT_URL || "http://localhost:5173",
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json());

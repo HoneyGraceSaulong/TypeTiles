@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { ArrowRight, Check, Copy, Users, Wifi } from "lucide-react";
+import { PLAYER_TOKEN_KEY } from "../lib/playerApi";
+import { usePlayerAuth } from "../lib/PlayerAuthContext";
 
 type Player = { id: string; name: string; ready: boolean; isHost: boolean };
 type RoomState = { roomCode: string; started: boolean; maxPlayers: number; players: Player[] };
@@ -9,9 +11,10 @@ type SocketMessage = RoomState & { type: string; message?: string; playerId?: st
 const defaultHost = "localhost:3001";
 
 export default function Lobby() {
+  const { user } = usePlayerAuth();
   const socketRef = useRef<WebSocket | null>(null);
   const [hostAddress, setHostAddress] = useState(defaultHost);
-  const [playerName, setPlayerName] = useState("Player");
+  const [playerName, setPlayerName] = useState(user?.displayName || user?.username || "Player");
   const [roomCode, setRoomCode] = useState("");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [error, setError] = useState("");
@@ -45,10 +48,16 @@ export default function Lobby() {
       setError("Connecting to the host. Try again when the connection indicator is green.");
       return;
     }
-    socketRef.current.send(JSON.stringify(message));
+    const token = localStorage.getItem(PLAYER_TOKEN_KEY);
+    socketRef.current.send(JSON.stringify(token ? { ...message, token } : message));
   };
 
   const createRoom = () => {
+    if (user?.role !== "teacher") {
+      setError("Only teacher accounts can create classroom rooms.");
+      return;
+    }
+
     send({ type: "create_room", playerName, mode: "LAN Match", difficulty: "Normal", wordSet: "General", roundTime: 90 });
   };
 
@@ -99,7 +108,11 @@ export default function Lobby() {
               <label className="text-sm text-white/70">Host address<input value={hostAddress} onChange={(event) => setHostAddress(event.target.value)} className="mt-2 h-11 w-full rounded-[7px] border border-white/10 bg-[#d7d7df] px-3 font-semibold text-[#161a3b] outline-none" /></label>
               <button type="button" onClick={connect} className="h-11 rounded-[7px] border border-[#3150b3] px-5 font-semibold text-white hover:bg-white/10">{status === "connecting" ? "Connecting..." : "Connect"}</button>
             </div>
-            <button type="button" onClick={createRoom} className="mt-5 text-sm font-semibold text-[#6f9fff] hover:text-white">Host a new room instead</button>
+            {user?.role === "teacher" ? (
+              <button type="button" onClick={createRoom} className="mt-5 text-sm font-semibold text-[#6f9fff] hover:text-white">Host a new room instead</button>
+            ) : (
+              <div className="mt-5 text-sm text-white/60">Teacher accounts can host classroom rooms.</div>
+            )}
           </article>
         </>
       ) : (

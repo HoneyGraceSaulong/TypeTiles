@@ -8,6 +8,7 @@ interface User {
   display_name: string;
   email: string;
   tier: string;
+  role: "student" | "teacher" | "admin";
   is_banned: number;
   created_at: string;
 }
@@ -19,6 +20,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [feedback, setFeedback] = useState("");
 
   useEffect(() => {
     loadUsers();
@@ -60,6 +62,7 @@ export default function UsersPage() {
 
   const handleUpdateTier = async (userId: number, tier: string) => {
     try {
+      setFeedback("");
       await apiClient.updateUserTier(userId, tier);
       setUsers(users.map((u) => (u.id === userId ? { ...u, tier } : u)));
       setShowModal(false);
@@ -73,6 +76,7 @@ export default function UsersPage() {
     if (!confirm("Are you sure you want to reset this user's stats?")) return;
 
     try {
+      setFeedback("");
       await apiClient.resetUserStats(userId);
       alert("User stats reset successfully");
     } catch (err: any) {
@@ -80,10 +84,27 @@ export default function UsersPage() {
     }
   };
 
+  const handleUpdateRole = async (user: User) => {
+    if (user.role === "admin") return;
+
+    const nextRole = user.role === "teacher" ? "student" : "teacher";
+    if (!confirm(`Change ${user.display_name}'s role to ${nextRole}?`)) return;
+
+    try {
+      setFeedback("");
+      await apiClient.updateUserRole(user.id, nextRole);
+      await loadUsers();
+      setFeedback(`${user.display_name} is now a ${nextRole}.`);
+    } catch (err: any) {
+      setFeedback(err.response?.data?.error || "Failed to update user role");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-white mb-4">User Management</h1>
+        {feedback ? <div className="mb-4 rounded border border-blue-700 bg-blue-900/20 p-3 text-sm text-blue-200">{feedback}</div> : null}
 
         <div className="flex gap-2 mb-4">
           <div className="flex-1 relative">
@@ -112,6 +133,7 @@ export default function UsersPage() {
                   <th className="text-left py-3 px-4 text-gray-300">Username</th>
                   <th className="text-left py-3 px-4 text-gray-300">Email</th>
                   <th className="text-left py-3 px-4 text-gray-300">Tier</th>
+                  <th className="text-left py-3 px-4 text-gray-300">Role</th>
                   <th className="text-left py-3 px-4 text-gray-300">Status</th>
                   <th className="text-left py-3 px-4 text-gray-300">Joined</th>
                   <th className="text-left py-3 px-4 text-gray-300">Actions</th>
@@ -125,6 +147,11 @@ export default function UsersPage() {
                     <td className="py-3 px-4">
                       <span className="px-2 py-1 bg-blue-900/30 border border-blue-700 text-blue-300 rounded text-xs">
                         {user.tier}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className="px-2 py-1 bg-gray-700 border border-gray-600 text-gray-200 rounded text-xs">
+                        {user.role}
                       </span>
                     </td>
                     <td className="py-3 px-4">
@@ -177,6 +204,16 @@ export default function UsersPage() {
                         >
                           <RotateCcw className="w-4 h-4" />
                         </button>
+                        {user.role !== "admin" ? (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateRole(user)}
+                            title={user.role === "teacher" ? "Revoke teacher role" : "Assign teacher role"}
+                            className="rounded border border-purple-700 px-2 py-1 text-xs text-purple-300 hover:bg-purple-900/50"
+                          >
+                            {user.role === "teacher" ? "Student" : "Teacher"}
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

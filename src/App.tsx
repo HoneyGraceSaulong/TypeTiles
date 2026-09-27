@@ -17,12 +17,18 @@ import Play from "./pages/Play";
 import PreMatch from "./pages/PreMatch";
 import Results from "./pages/Results";
 import Settings from "./pages/Settings";
+import TeacherDashboard from "./pages/TeacherDashboard";
 
 function GameRoute() {
   const location = useLocation();
   const state = location.state as { matchConfig?: typeof mockMatchConfig; matchId?: number } | null;
 
   return <Game matchConfig={state?.matchConfig ?? mockMatchConfig} matchId={state?.matchId} />;
+}
+
+function DashboardRoute() {
+  const { user } = usePlayerAuth();
+  return user?.role === "teacher" ? <TeacherDashboard /> : <Dashboard />;
 }
 
 function ProtectedApp() {
@@ -49,7 +55,7 @@ export default function App() {
       <Route path="/register" element={<PlayerAuth />} />
 
       <Route path="/app/*" element={<ProtectedApp />}>
-        <Route index element={<Dashboard />} />
+        <Route index element={<DashboardRoute />} />
         <Route path="play" element={<Play />} />
         <Route path="lobby" element={<Lobby />} />
         <Route path="pre-match" element={<PreMatch />} />

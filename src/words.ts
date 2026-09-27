@@ -15,4 +15,12 @@ export const WORDS: string[] = [
   "see",
   "program",
   "framework",
+  "Kylie",
+  "Deo",
+  "Hani",
+  "Delig",
+  "Jac",
+  "Team Yey",
+  "HydrpQuack",
+  "Hello",
 ];

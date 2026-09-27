@@ -72,7 +72,7 @@ export default function LeaderboardPage() {
       </div>
 
       {isLoading ? (
-        <div className="text-gray-400">Loading leaderboard...</div>
+        <div className="text-gray-400">Loading and Waiting leaderboard...</div>
       ) : error ? (
         <div className="text-red-400">{error}</div>
       ) : (

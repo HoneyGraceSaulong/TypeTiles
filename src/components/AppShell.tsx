@@ -82,7 +82,7 @@ export function AppShell() {
           </nav>
 
           <div className="mt-8 border-t border-white/10 pt-4">
-            <div className="mb-3 truncate px-3 text-xs text-white/60">{user?.displayName || user?.username}</div>
+            <div className="mb-3 truncate px-3 text-xs text-white/60">{user?.displayName || user?.username} · {user?.role}</div>
             <button type="button" onClick={handleLogout} className="flex w-full items-center gap-3 rounded-[0.55rem] px-3 py-3 text-sm font-semibold text-white/80 transition hover:bg-white/8 hover:text-white">
               <LogOut className="h-5 w-5" />
               <span>Log out</span>

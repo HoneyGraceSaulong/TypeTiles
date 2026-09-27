@@ -1,10 +1,6 @@
 import axios, { AxiosInstance } from "axios";
 
-const API_URL = process.env.VITE_API_URL || "http://localhost:3001/api";
-
-interface APIConfig {
-  token?: string;
-}
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001/api";
 
 class APIClient {
   private client: AxiosInstance;
@@ -67,6 +63,10 @@ class APIClient {
 
   async updateUserTier(userId: number, tier: string) {
     return this.client.put(`/admin/users/${userId}/tier`, { tier });
+  }
+
+  async updateUserRole(userId: number, role: "student" | "teacher") {
+    return this.client.put(`/admin/users/${userId}/role`, { role });
   }
 
   async resetUserStats(userId: number) {

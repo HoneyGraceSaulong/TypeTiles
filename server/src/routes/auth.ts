@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { getDatabase } from "../db.js";
-import { hashPassword, verifyPassword, generateToken } from "../auth.js";
+import { hashPassword, verifyPassword, generateToken, normalizeRole } from "../auth.js";
 import { authMiddleware } from "../middleware.js";
 
 const router = Router();
@@ -57,7 +57,7 @@ router.post("/register", async (req: Request<{}, {}, RegisterBody>, res: Respons
     const token = generateToken({
       userId,
       username,
-      role: "player",
+      role: "student",
     });
 
     res.status(201).json({
@@ -69,7 +69,7 @@ router.post("/register", async (req: Request<{}, {}, RegisterBody>, res: Respons
         email,
         displayName,
         tier: "Volt",
-        role: "player",
+        role: "student",
       },
     });
   } catch (error) {
@@ -111,7 +111,7 @@ router.post("/login", async (req: Request<{}, {}, LoginBody>, res: Response) => 
     const token = generateToken({
       userId: user.id,
       username: user.username,
-      role: user.role,
+      role: normalizeRole(user.role),
     });
 
     res.json({
@@ -122,7 +122,7 @@ router.post("/login", async (req: Request<{}, {}, LoginBody>, res: Response) => 
         email: user.email,
         displayName: user.display_name,
         tier: user.tier,
-        role: user.role,
+        role: normalizeRole(user.role),
       },
     });
   } catch (error) {
@@ -154,7 +154,7 @@ router.get("/me", authMiddleware, async (req: Request, res: Response) => {
         displayName: user.display_name,
         avatar: user.avatar,
         tier: user.tier,
-        role: user.role,
+        role: normalizeRole(user.role),
       },
       stats,
     });

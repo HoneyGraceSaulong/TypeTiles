@@ -79,7 +79,7 @@ export default function DashboardPage() {
               <tr className="border-b border-gray-700">
                 <th className="text-left py-2 px-4 text-gray-400">Username</th>
                 <th className="text-left py-2 px-4 text-gray-400">Score</th>
-                <th className="text-left py-2 px-4 text-gray-400">Best WPM</th>
+                <th className="text-left py-2 px-4 text-gray-400">The Best WPM</th>
                 <th className="text-left py-2 px-4 text-gray-400">Accuracy</th>
                 <th className="text-left py-2 px-4 text-gray-400">Games</th>
               </tr>

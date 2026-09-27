@@ -54,7 +54,7 @@ router.get("/users", async (req: Request, res: Response) => {
     const { limit = 50, offset = 0, search } = req.query;
     const db = getDatabase();
 
-    let query = `SELECT id, username, display_name, email, tier, is_banned, created_at FROM users`;
+    let query = `SELECT id, username, display_name, email, tier, role, is_banned, created_at FROM users`;
     let params: any[] = [];
 
     if (search) {
@@ -162,6 +162,35 @@ router.put("/users/:userId/tier", async (req: Request, res: Response) => {
     res.json({ message: "User tier updated successfully", tier });
   } catch (error) {
     console.error("Update tier error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Provision or revoke a teacher role. Public registration cannot assign this role.
+router.put("/users/:userId/role", async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+
+    if (role !== "student" && role !== "teacher") {
+      return res.status(400).json({ error: "Role must be student or teacher" });
+    }
+
+    const db = getDatabase();
+    const user = await db.get("SELECT id FROM users WHERE id = ?", [userId]);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    await db.run("UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [role, userId]);
+    await db.run(
+      "INSERT INTO admin_logs (admin_id, action, target_user_id, details) VALUES (?, ?, ?, ?)",
+      [req.user!.userId, "update_role", userId, `Updated to ${role}`],
+    );
+
+    res.json({ message: "User role updated successfully", role });
+  } catch (error) {
+    console.error("Update user role error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

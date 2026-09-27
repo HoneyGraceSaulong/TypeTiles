@@ -9,7 +9,7 @@ export type PlayerUser = {
   displayName: string;
   avatar?: string;
   tier: string;
-  role: string;
+  role: "student" | "teacher" | "admin";
 };
 
 export type PlayerStats = {

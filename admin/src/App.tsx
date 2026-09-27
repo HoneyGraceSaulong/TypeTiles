@@ -69,7 +69,6 @@ function NavLink({ to, icon, label }: { to: string; icon: React.ReactNode; label
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [user, setUser] = useState<AuthUser | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("admin_token");
@@ -80,7 +79,6 @@ function App() {
         .then((res) => {
           if (res.data.user.role === "admin") {
             setIsAuthenticated(true);
-            setUser(res.data.user);
           } else {
             localStorage.removeItem("admin_token");
             setIsAuthenticated(false);
@@ -103,7 +101,6 @@ function App() {
       localStorage.setItem("admin_token", token);
       apiClient.setToken(token);
       setIsAuthenticated(true);
-      setUser(userData);
     } else {
       alert("You don't have admin access");
     }
@@ -111,7 +108,6 @@ function App() {
 
   const handleLogout = () => {
     setIsAuthenticated(false);
-    setUser(null);
   };
 
   if (isLoading) {

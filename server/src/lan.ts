@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { IncomingMessage } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import { getDatabase } from "./db.js";
-import { verifyToken } from "./auth.js";
+import { normalizeRole, verifyToken, type AppRole } from "./auth.js";
 
 const MAX_PLAYERS = 8;
 
@@ -24,6 +24,7 @@ type Player = {
   id: string;
   name: string;
   userId?: number;
+  role?: AppRole;
   ready: boolean;
   isHost: boolean;
   socket: WebSocket;
@@ -37,6 +38,7 @@ type Room = {
   wordSet: string;
   roundTime: number;
   started: boolean;
+  ownerUserId: number;
   players: Map<string, Player>;
 };
 
@@ -84,6 +86,23 @@ async function createDatabaseMatch(message: ClientMessage) {
   return result.lastID;
 }
 
+async function authenticatePlayer(token: string | undefined) {
+  const payload = token ? verifyToken(token) : null;
+  if (!payload) return null;
+
+  const user = await getDatabase().get(
+    "SELECT id, username, role, is_banned FROM users WHERE id = ?",
+    [payload.userId],
+  );
+  if (!user || user.is_banned) return null;
+
+  return {
+    userId: user.id as number,
+    username: user.username as string,
+    role: normalizeRole(user.role),
+  };
+}
+
 function leaveRoom(player: Player) {
   for (const room of rooms.values()) {
     if (!room.players.delete(player.id)) continue;
@@ -125,9 +144,20 @@ export function attachLanServer(server: import("http").Server) {
             send(socket, { type: "error", message: "You are already in a room" });
             return;
           }
-          player.name = message.playerName?.trim() || "Host";
+          const identity = await authenticatePlayer(message.token);
+          if (!identity) {
+            send(socket, { type: "error", message: "Authentication is required to create a room." });
+            return;
+          }
+          if (identity.role !== "teacher") {
+            send(socket, { type: "error", message: "Only teachers can create classroom rooms." });
+            return;
+          }
+
+          player.name = identity.username;
           player.isHost = true;
-          player.userId = message.token ? verifyToken(message.token)?.userId : undefined;
+          player.userId = identity.userId;
+          player.role = identity.role;
           const room: Room = {
             code: makeRoomCode(),
             dbMatchId: await createDatabaseMatch(message),
@@ -136,9 +166,14 @@ export function attachLanServer(server: import("http").Server) {
             wordSet: message.wordSet || "General",
             roundTime: message.roundTime || 90,
             started: false,
+            ownerUserId: identity.userId,
             players: new Map([[player.id, player]]),
           };
           rooms.set(room.code, room);
+          await getDatabase().run(
+            "INSERT INTO match_participants (match_id, user_id) VALUES (?, ?)",
+            [room.dbMatchId, identity.userId],
+          );
           send(socket, { type: "room_created", roomCode: room.code, playerId: player.id });
           broadcast(room);
           return;
@@ -154,8 +189,15 @@ export function attachLanServer(server: import("http").Server) {
             send(socket, { type: "error", message: "This room is full (8 players maximum)." });
             return;
           }
-          player.name = message.playerName?.trim() || `Player ${room.players.size + 1}`;
-          player.userId = message.token ? verifyToken(message.token)?.userId : undefined;
+          const identity = await authenticatePlayer(message.token);
+          if (!identity) {
+            send(socket, { type: "error", message: "Authentication is required to join a room." });
+            return;
+          }
+
+          player.name = identity.username;
+          player.userId = identity.userId;
+          player.role = identity.role;
           room.players.set(player.id, player);
           if (room.dbMatchId && player.userId) {
             await getDatabase().run(`INSERT INTO match_participants (match_id, user_id) VALUES (?, ?)`, [room.dbMatchId, player.userId]);
@@ -177,7 +219,7 @@ export function attachLanServer(server: import("http").Server) {
           player.ready = true;
           broadcast(room);
         } else if (message.type === "start_game") {
-          if (!player.isHost) {
+          if (!player.isHost || player.userId !== room.ownerUserId) {
             send(socket, { type: "error", message: "Only the host can start the game." });
             return;
           }
