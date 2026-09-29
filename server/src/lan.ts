@@ -7,7 +7,7 @@ import { normalizeRole, verifyToken, type AppRole } from "./auth.js";
 const MAX_PLAYERS = 8;
 
 type ClientMessage = {
-  type: "create_room" | "join_room" | "leave_room" | "ready" | "start_game" | "score_update";
+  type: "create_room" | "join_room" | "leave_room" | "cancel_room" | "ready" | "start_game" | "score_update";
   roomCode?: string;
   playerName?: string;
   token?: string;
@@ -235,7 +235,19 @@ export function attachLanServer(server: import("http").Server) {
           return;
         }
 
-        if (message.type === "leave_room") {
+        if (message.type === "cancel_room") {
+          const identity = await authenticatePlayer(message.token);
+          if (!identity || identity.role !== "teacher" || identity.userId !== room.ownerUserId || player.userId !== room.ownerUserId) {
+            send(socket, { type: "error", message: "Only the teacher who owns this classroom can cancel it." });
+            return;
+          }
+
+          for (const participant of room.players.values()) {
+            send(participant.socket, { type: "room_cancelled", roomCode: room.code, message: "The teacher cancelled this classroom." });
+          }
+          rooms.delete(room.code);
+          for (const participant of room.players.values()) participant.socket.close();
+        } else if (message.type === "leave_room") {
           leaveRoom(player);
         } else if (message.type === "ready") {
           player.ready = true;

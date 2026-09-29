@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { ArrowRight, Check, Copy, Users, Wifi } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { PLAYER_TOKEN_KEY } from "../lib/playerApi";
 import { usePlayerAuth } from "../lib/PlayerAuthContext";
 
@@ -13,6 +14,7 @@ const LAN_ROOM_CODE_KEY = "type_tiles_lan_room_code";
 
 export default function Lobby() {
   const { user } = usePlayerAuth();
+  const navigate = useNavigate();
   const socketRef = useRef<WebSocket | null>(null);
   const pendingMessageRef = useRef<object | null>(null);
   const pendingAfterReconnectRef = useRef<object | null>(null);
@@ -62,6 +64,14 @@ export default function Lobby() {
         localStorage.removeItem(LAN_ROOM_CODE_KEY);
         setError(message.message || "The classroom is no longer available.");
       }
+      if (message.type === "room_cancelled") {
+        setRoom(null);
+        setRoomCode("");
+        localStorage.removeItem(LAN_ROOM_CODE_KEY);
+        setError(message.message || "The classroom was cancelled.");
+        socket.close();
+        navigate("/app/lobby", { replace: true, state: { message: message.message || "The classroom was cancelled." } });
+      }
       if (message.type === "error") {
         const text = message.message || "Unable to connect to the room.";
         if (text.includes("Room not found")) {
@@ -90,7 +100,7 @@ export default function Lobby() {
     pendingMessageRef.current = { type: "join_room", roomCode: savedRoomCode, playerName };
     connect();
     return () => socketRef.current?.close();
-  }, [user?.id]);
+  }, [navigate, user?.id]);
 
   const send = (message: object) => {
     if (socketRef.current?.readyState !== WebSocket.OPEN) {
@@ -124,6 +134,32 @@ export default function Lobby() {
       return;
     }
     send({ type: "join_room", roomCode, playerName });
+  };
+
+  const clearLocalRoom = () => {
+    setRoom(null);
+    setRoomCode("");
+    localStorage.removeItem(LAN_ROOM_CODE_KEY);
+  };
+
+  const exitClassroom = () => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "leave_room", token: localStorage.getItem(PLAYER_TOKEN_KEY) }));
+    } else {
+      socketRef.current?.close();
+    }
+    clearLocalRoom();
+    navigate("/app/lobby", { replace: true });
+  };
+
+  const cancelClassroom = () => {
+    if (!window.confirm("Cancel this classroom? All students will be disconnected from this session.")) return;
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "cancel_room", token: localStorage.getItem(PLAYER_TOKEN_KEY) }));
+      return;
+    }
+
+    setError("The classroom connection is closed. Reconnect before cancelling.");
   };
 
   const currentPlayer = room?.players.find((player) => player.userId === user?.id) ?? room?.players.find((player) => player.name === playerName);
@@ -179,7 +215,7 @@ export default function Lobby() {
             <div className="flex min-h-[380px] flex-col justify-between">
               <div><div className="text-sm text-white/70">You have joined the session.</div><h1 className="mt-1 text-[1.55rem] font-semibold text-white sm:text-[1.85rem]">{room.started ? "Game Starting" : "Waiting Room"}</h1></div>
               <div><h2 className="text-[1.45rem] font-semibold text-[#6f9fff]">{room.started ? "Waiting for synchronized match..." : "Waiting for the teacher"}</h2><p className="mt-2 text-white/75">{room.started ? "The classroom is ready. Multiplayer gameplay synchronization will begin here." : "The game will start when the teacher starts the session."}</p></div>
-              <div className="flex flex-wrap gap-3">{!room.started ? <button type="button" onClick={() => send({ type: "ready" })} className="inline-flex items-center gap-2 rounded-[7px] bg-[#2948aa] px-5 py-3 font-semibold text-white"><Check className="h-5 w-5" />{currentPlayer?.ready ? "Ready" : "Mark Ready"}</button> : null}{!room.started && currentPlayer?.isHost ? <button type="button" onClick={() => send({ type: "start_game" })} className="rounded-[7px] border border-[#00d77c] px-5 py-3 font-semibold text-[#00ed8a]">Start Game</button> : null}</div>
+              <div className="flex flex-wrap gap-3">{!room.started ? <button type="button" onClick={() => send({ type: "ready" })} className="inline-flex items-center gap-2 rounded-[7px] bg-[#2948aa] px-5 py-3 font-semibold text-white"><Check className="h-5 w-5" />{currentPlayer?.ready ? "Ready" : "Mark Ready"}</button> : null}{!room.started && currentPlayer?.isHost ? <button type="button" onClick={() => send({ type: "start_game" })} className="rounded-[7px] border border-[#00d77c] px-5 py-3 font-semibold text-[#00ed8a]">Start Game</button> : null}{currentPlayer?.isHost ? <button type="button" onClick={cancelClassroom} className="rounded-[7px] border border-red-400/60 px-5 py-3 font-semibold text-red-200">Cancel Classroom</button> : <button type="button" onClick={exitClassroom} className="rounded-[7px] border border-white/20 px-5 py-3 font-semibold text-white">Exit Classroom</button>}</div>
             </div>
             <div><div className="flex items-center gap-2 text-sm text-white"><span className="h-3 w-3 rounded-full bg-[#11c77a]" />Room Lobby</div><div className="mt-1 text-xs text-white/80">Room Code: <span className="font-bold tracking-[0.18em]">{room.roomCode}</span><button type="button" onClick={() => navigator.clipboard?.writeText(room.roomCode)} className="ml-2 text-[#6f9fff]" aria-label="Copy room code"><Copy className="inline h-3.5 w-3.5" /></button></div><div className="mt-3 overflow-hidden rounded-[8px] border border-[#2c6db2] bg-[#1c2451]"><div className="border-b border-[#2c6db2] px-7 py-3"><div className="font-semibold text-white">Connected Players</div><div className="text-xs text-white/75">{room.players.length}/{room.maxPlayers} players in the room</div></div>{room.players.map((player, index) => <div key={player.id} className="flex items-center gap-3 border-b border-[#2c6db2] px-7 py-2 last:border-0"><div className={`grid h-11 w-11 place-items-center rounded-full ${playerColors[index]}`}><Users className="h-7 w-7 text-white" /></div><div><div className="text-sm font-semibold text-white">{player.name}{player.isHost ? " (HOST)" : ""}</div><div className="text-xs text-[#00ed8a]">{player.ready ? "Ready" : "Waiting"}</div></div></div>)}</div></div>
           </div>

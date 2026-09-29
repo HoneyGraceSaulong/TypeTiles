@@ -60,9 +60,9 @@ export const mockWordPools = {
 };
 
 export const mockMatchConfig: MatchConfig = {
-  mode: "Ranked Duel",
-  difficulty: "Hard",
+  mode: "Solo Practice",
+  difficulty: "Normal",
   roundTime: 90,
-  wordSet: "Ops Tier",
-  opponents: ["Nova-7", "Cipher"],
+  wordSet: "General",
+  opponents: [],
 };

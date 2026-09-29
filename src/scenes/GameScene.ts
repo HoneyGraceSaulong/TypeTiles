@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { WORDS } from "../words";
+import { getWordCategory, WORD_BANK } from "../words";
 import { PauseMenu } from "./game/PauseMenu";
 import { getLaneX, pickLaneNotSame, type Lane } from "./game/lanes";
 import { WaterEffects, WATER_TEXTURE_KEY } from "./game/WaterEffects";
@@ -10,7 +10,10 @@ export type GameResult = {
   score: number;
   wpm: number;
   accuracy: number;
+  errorRate: number;
   completedWords: number;
+  remainingLives: number;
+  endReason: "time" | "health";
   mode: string;
   difficulty: string;
   roundTime: number;
@@ -23,6 +26,12 @@ type GameSceneInitData = {
 };
 
 export default class GameScene extends Phaser.Scene {
+  private static readonly DIFFICULTY_CONFIG = {
+    easy: { fallSpeed: 55, minimumLength: 1, maximumLength: 4 },
+    normal: { fallSpeed: 75, minimumLength: 5, maximumLength: 7 },
+    hard: { fallSpeed: 105, minimumLength: 6, maximumLength: Number.POSITIVE_INFINITY },
+  } as const;
+
   private readonly WATER_FRAME_SIZE = 1000;
   private readonly WATER_LAST_FRAME = 3;
   private matchDurationSeconds = 60;
@@ -32,7 +41,7 @@ export default class GameScene extends Phaser.Scene {
   private readonly TYPED_FONT_SIZE = 22;
   private readonly TILE_HEIGHT = 52;
   private readonly TILE_PADDING_X = 50;
-  private readonly fallSpeedPxPerSec = 75;
+  private fallSpeedPxPerSec: number = GameScene.DIFFICULTY_CONFIG.normal.fallSpeed;
   // ==============
 
   private typedDisplay!: Phaser.GameObjects.Text;
@@ -53,6 +62,10 @@ export default class GameScene extends Phaser.Scene {
   private correctKeystrokes = 0;
   private incorrectKeystrokes = 0;
   private completedCharacters = 0;
+  private lives = 3;
+  private difficultyKey: keyof typeof GameScene.DIFFICULTY_CONFIG = "normal";
+  private wordCategory = "general" as keyof typeof WORD_BANK;
+  private endReason: "time" | "health" = "time";
   private gameOver = false;
   private wordX = 0;
   private wordY = 60;
@@ -67,6 +80,9 @@ export default class GameScene extends Phaser.Scene {
     this.onGameOver = onGameOver;
     this.matchDurationSeconds = matchConfig.roundTime;
     this.remainingSeconds = this.matchDurationSeconds;
+    this.difficultyKey = this.getDifficultyKey(matchConfig.difficulty);
+    this.wordCategory = getWordCategory(matchConfig.wordSet);
+    this.fallSpeedPxPerSec = GameScene.DIFFICULTY_CONFIG[this.difficultyKey].fallSpeed;
   }
 
   preload(): void {
@@ -167,8 +183,14 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private spawnWord(): void {
-    const index = Phaser.Math.Between(0, WORDS.length - 1);
-    this.activeWord = WORDS[index];
+    const difficulty = GameScene.DIFFICULTY_CONFIG[this.difficultyKey];
+    const categoryWords = WORD_BANK[this.wordCategory];
+    const candidates = categoryWords.filter(
+      (word) => word.length >= difficulty.minimumLength && word.length <= difficulty.maximumLength,
+    );
+    const wordPool = candidates.length > 0 ? candidates : categoryWords;
+    const index = Phaser.Math.Between(0, wordPool.length - 1);
+    this.activeWord = wordPool[index];
 
     this.typedText = "";
     this.typedDisplay.setText("");
@@ -258,7 +280,15 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private onMissBottom(): void {
+    this.lives = Math.max(0, this.lives - 1);
     this.score -= 5;
+    if (this.lives === 0) {
+      this.endReason = "health";
+      this.updateHud();
+      this.endMatch();
+      return;
+    }
+
     this.updateHud();
 
     this.cameras.main.shake(120, 0.004);
@@ -270,9 +300,10 @@ export default class GameScene extends Phaser.Scene {
     const wpm = elapsedMinutes > 0 ? this.completedCharacters / 5 / elapsedMinutes : 0;
     const totalKeystrokes = this.correctKeystrokes + this.incorrectKeystrokes;
     const accuracy = totalKeystrokes > 0 ? (this.correctKeystrokes / totalKeystrokes) * 100 : 0;
+    const errorRate = totalKeystrokes > 0 ? (this.incorrectKeystrokes / totalKeystrokes) * 100 : 0;
 
     this.hudText.setText(
-      `Score: ${this.score}  Time: ${Math.ceil(this.remainingSeconds)}  WPM: ${wpm.toFixed(1)}  Accuracy: ${accuracy.toFixed(1)}%`,
+      `Lives: ${this.lives}  Score: ${this.score}  Time: ${Math.ceil(this.remainingSeconds)}  WPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%  Error Rate: ${errorRate.toFixed(1)}%  Difficulty: ${this.difficultyKey.toUpperCase()}`,
     );
   }
 
@@ -282,12 +313,16 @@ export default class GameScene extends Phaser.Scene {
     const wpm = elapsedMinutes > 0 ? this.completedCharacters / 5 / elapsedMinutes : 0;
     const totalKeystrokes = this.correctKeystrokes + this.incorrectKeystrokes;
     const accuracy = totalKeystrokes > 0 ? (this.correctKeystrokes / totalKeystrokes) * 100 : 0;
+    const errorRate = totalKeystrokes > 0 ? (this.incorrectKeystrokes / totalKeystrokes) * 100 : 0;
 
     this.onGameOver({
       score: this.score,
       wpm,
       accuracy,
+      errorRate,
       completedWords: this.completedWords,
+      remainingLives: this.lives,
+      endReason: this.endReason,
       mode: this.matchConfig.mode,
       difficulty: this.matchConfig.difficulty,
       roundTime: this.matchConfig.roundTime,
@@ -296,8 +331,16 @@ export default class GameScene extends Phaser.Scene {
 
     this.gameOverDisplay
       .setText(
-        `GAME OVER\n\nScore: ${this.score}\nWPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%\nCompleted words: ${this.completedWords}`,
+        `GAME OVER\n\nReason: ${this.endReason === "health" ? "Health depleted" : "Time expired"}\nScore: ${this.score}\nWPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%\nError Rate: ${errorRate.toFixed(1)}%\nCompleted words: ${this.completedWords}\nLives: ${this.lives}`,
       )
       .setVisible(true);
+  }
+
+  private getDifficultyKey(difficulty: string): keyof typeof GameScene.DIFFICULTY_CONFIG {
+    const normalizedDifficulty = difficulty.toLowerCase();
+    if (normalizedDifficulty === "easy" || normalizedDifficulty === "hard" || normalizedDifficulty === "extreme") {
+      return normalizedDifficulty === "easy" ? "easy" : "hard";
+    }
+    return "normal";
   }
 }

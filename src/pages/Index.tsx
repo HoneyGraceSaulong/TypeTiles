@@ -9,17 +9,17 @@ const assetRoot = "/figma/type-tiles-home";
 
 const categories = [
   { label: "CORPORATE", image: `${assetRoot}/image4.png`, dimmed: true },
-  { label: "COMMUNICATE", image: `${assetRoot}/image5.png` },
+  { label: "COMMUNICATION", image: `${assetRoot}/image5.png` },
   { label: "RECORDS", image: `${assetRoot}/image6.png`, dimmed: true },
   { label: "ACCOUNTING", image: `${assetRoot}/image7.png`, dimmed: true },
   { label: "TECHNOLOGY", image: `${assetRoot}/image8.png`, dimmed: true },
   { label: "GENERAL", solid: true },
 ] as const;
 
-const speedOptions = ["Slow", "Normal", "Medium", "Fast"] as const;
+const difficultyOptions = ["Easy", "Normal", "Hard"] as const;
 
 type CategoryLabel = (typeof categories)[number]["label"];
-type SpeedLabel = (typeof speedOptions)[number];
+type DifficultyLabel = (typeof difficultyOptions)[number];
 
 type HomeProfile = {
   name: string;
@@ -63,7 +63,7 @@ export default function Dashboard() {
   const [profileOpen, setProfileOpen] = useState(false);
 
   const [selectedCategory, setSelectedCategory] = useState<CategoryLabel | null>(null);
-  const [selectedSpeed, setSelectedSpeed] = useState<SpeedLabel>("Normal");
+  const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLabel>("Normal");
 
   const progressWidth = useMemo(() => Math.min(100, Math.max(0, profile.level * 0.95)), [profile.level]);
 
@@ -80,19 +80,14 @@ export default function Dashboard() {
   const handleStartFromCategory = () => {
     if (!selectedCategory) return;
 
-    const difficultyBySpeed: Record<SpeedLabel, string> = {
-      Slow: "Easy",
-      Normal: "Normal",
-      Medium: "Hard",
-      Fast: "Extreme",
-    };
-
     navigate("/app/pre-match", {
       state: {
         matchConfig: {
           ...mockMatchConfig,
           wordSet: selectedCategory,
-          difficulty: difficultyBySpeed[selectedSpeed],
+          mode: "Solo Practice",
+          difficulty: selectedDifficulty,
+          opponents: [],
         },
       },
     });
@@ -204,7 +199,7 @@ export default function Dashboard() {
                 key={category.label}
                 onClick={() => {
                   setSelectedCategory(category.label);
-                  setSelectedSpeed("Normal");
+                  setSelectedDifficulty("Normal");
                 }}
                 className="relative aspect-[4/3] overflow-hidden rounded-[8px] border-2 border-[#1183bb] bg-[#1a2349] text-left shadow-[0_16px_30px_rgba(4,8,25,0.35)] transition hover:scale-[1.01] hover:border-sky-300 xl:aspect-[1/1]"
               >
@@ -317,19 +312,19 @@ export default function Dashboard() {
 
               <div className="mt-6 flex items-center gap-3 text-white/90">
                 <div className="h-px flex-1 bg-white/70" />
-                <span className="font-['Roboto'] text-[1.85rem] font-bold tracking-[0.03em]">SPEED SETTING</span>
+                <span className="font-['Roboto'] text-[1.85rem] font-bold tracking-[0.03em]">DIFFICULTY</span>
                 <div className="h-px flex-1 bg-white/70" />
               </div>
 
-              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {speedOptions.map((speed) => (
+              <div className="mt-5 grid grid-cols-3 gap-3">
+                {difficultyOptions.map((difficulty) => (
                   <button
-                    key={speed}
+                    key={difficulty}
                     type="button"
-                    onClick={() => setSelectedSpeed(speed)}
-                    className={`rounded-[8px] border px-2 py-2 text-lg font-bold transition ${selectedSpeed === speed ? "border-[#5da3c5] bg-[#0898dd] text-white" : "border-white bg-white text-[#0898dd]"}`}
+                    onClick={() => setSelectedDifficulty(difficulty)}
+                    className={`rounded-[8px] border px-2 py-2 text-lg font-bold transition ${selectedDifficulty === difficulty ? "border-[#5da3c5] bg-[#0898dd] text-white" : "border-white bg-white text-[#0898dd]"}`}
                   >
-                    {speed}
+                    {difficulty}
                   </button>
                 ))}
               </div>

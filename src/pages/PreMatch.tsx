@@ -78,19 +78,12 @@ export default function PreMatch() {
       <div className="mt-6 grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
         <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-5 text-left text-slate-300">
           <div className="text-xs uppercase tracking-[0.3em] text-slate-400">
-            Opponent Cards
+            Practice Session
           </div>
 
-          <ul className="mt-3 space-y-3">
-            {matchConfig.opponents.map((opponent) => (
-              <li
-                key={opponent}
-                className="rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white"
-              >
-                {opponent}
-              </li>
-            ))}
-          </ul>
+          <div className="mt-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-white">
+            Category: {matchConfig.wordSet}
+          </div>
         </div>
 
         <div className="rounded-[1.5rem] border border-white/10 bg-[radial-gradient(circle_at_top,rgba(45,212,191,0.15),transparent_42%),linear-gradient(180deg,rgba(2,6,23,0.85),rgba(15,23,42,0.95))] p-5 text-left">
