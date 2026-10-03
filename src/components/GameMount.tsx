@@ -2,15 +2,30 @@ import Phaser from "phaser";
 import { useEffect, useRef } from "react";
 import MatchHudScene from "../scenes/match_hud";
 import type { MatchConfig } from "../lib/mockData";
-import type { GameResult } from "../scenes/GameScene";
+import type { GamePerformance, GameResult } from "../scenes/GameScene";
 
 type Props = {
+  mode?: "solo" | "multiplayer";
+  roomCode?: string;
   matchConfig: MatchConfig;
   onGameOver: (result: GameResult) => void;
+  onPerformance?: (performance: GamePerformance) => void;
+  wordSequence?: string[];
+  startAt?: number;
 };
 
-export function GameMount({ matchConfig, onGameOver }: Props) {
+export function GameMount({ mode = "solo", roomCode, matchConfig, onGameOver, onPerformance, wordSequence, startAt }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const onGameOverRef = useRef(onGameOver);
+  const onPerformanceRef = useRef(onPerformance);
+
+  useEffect(() => {
+    onGameOverRef.current = onGameOver;
+  }, [onGameOver]);
+
+  useEffect(() => {
+    onPerformanceRef.current = onPerformance;
+  }, [onPerformance]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -38,8 +53,13 @@ export function GameMount({ matchConfig, onGameOver }: Props) {
     // Add and start the Phaser scene.
     // matchConfig is passed to GameScene.init().
     game.scene.add("GameScene", MatchHudScene, true, {
+      mode,
+      roomCode,
       matchConfig,
-      onGameOver,
+      onGameOver: (result: GameResult) => onGameOverRef.current(result),
+      onPerformance: (performance: GamePerformance) => onPerformanceRef.current?.(performance),
+      wordSequence,
+      startAt,
     });
 
     // Keep the Phaser canvas responsive when the window changes size.
@@ -54,7 +74,7 @@ export function GameMount({ matchConfig, onGameOver }: Props) {
       window.removeEventListener("resize", resize);
       game.destroy(true);
     };
-  }, [matchConfig, onGameOver]);
+  }, [matchConfig, mode, roomCode, startAt, wordSequence]);
 
   return (
     <div className="relative min-h-0 flex-1 overflow-hidden rounded-[2rem] border border-white/10 bg-black/30">

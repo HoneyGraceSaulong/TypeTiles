@@ -3,17 +3,29 @@ import { IncomingMessage } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import { getDatabase } from "./db.js";
 import { normalizeRole, verifyToken, type AppRole } from "./auth.js";
+import { getDifficultyKey, getWordsForDifficulty, getWordCategory, type WordCategory } from "./wordBank.js";
 
 const MAX_PLAYERS = 8;
+const COUNTDOWN_DELAY_MS = 3000;
+const SUPPORTED_ROUND_TIMES = [30, 60, 90] as const;
+
+type ClassroomMatchConfig = {
+  wordSet: WordCategory;
+  difficulty: "Easy" | "Normal" | "Hard";
+  roundTime: (typeof SUPPORTED_ROUND_TIMES)[number];
+};
 
 type ClientMessage = {
-  type: "create_room" | "join_room" | "leave_room" | "cancel_room" | "ready" | "start_game" | "score_update";
+  type: "create_room" | "join_room" | "leave_room" | "cancel_room" | "update_match_config" | "ready" | "start_game" | "score_update";
   roomCode?: string;
   playerName?: string;
   token?: string;
   score?: number;
   wpm?: number;
   accuracy?: number;
+  lives?: number;
+  completedWords?: number;
+  finished?: boolean;
   mode?: string;
   difficulty?: string;
   wordSet?: string;
@@ -23,11 +35,22 @@ type ClientMessage = {
 type Player = {
   id: string;
   name: string;
+  displayName?: string;
   userId?: number;
   role?: AppRole;
   ready: boolean;
   isHost: boolean;
   socket: WebSocket;
+  performance?: PlayerPerformance;
+};
+
+type PlayerPerformance = {
+  score: number;
+  wpm: number;
+  accuracy: number;
+  lives: number;
+  completedWords: number;
+  finished: boolean;
 };
 
 type Room = {
@@ -39,6 +62,9 @@ type Room = {
   roundTime: number;
   started: boolean;
   ownerUserId: number;
+  matchConfig: ClassroomMatchConfig;
+  wordSequence?: string[];
+  startAt?: number;
   players: Map<string, Player>;
 };
 
@@ -58,6 +84,8 @@ function roomState(room: Room) {
     difficulty: room.difficulty,
     wordSet: room.wordSet,
     roundTime: room.roundTime,
+    matchConfig: room.matchConfig,
+    startAt: room.startAt,
     started: room.started,
     maxPlayers: MAX_PLAYERS,
     players: [...room.players.values()].map(({ id, name, userId, ready, isHost }) => ({ id, name, userId, ready, isHost })),
@@ -67,6 +95,27 @@ function roomState(room: Room) {
 function broadcast(room: Room) {
   const state = roomState(room);
   for (const player of room.players.values()) send(player.socket, state);
+}
+
+function broadcastStandings(room: Room) {
+  const players = [...room.players.values()]
+    .filter((player) => player.role === "student" && player.userId !== undefined)
+    .map((player) => ({
+      userId: player.userId,
+      username: player.name,
+      displayName: player.displayName || player.name,
+      score: player.performance?.score || 0,
+      wpm: player.performance?.wpm || 0,
+      accuracy: player.performance?.accuracy || 0,
+      lives: player.performance?.lives ?? 3,
+      completedWords: player.performance?.completedWords || 0,
+      finished: player.performance?.finished || false,
+    }))
+    .sort((left, right) => right.score - left.score || right.wpm - left.wpm || right.accuracy - left.accuracy);
+
+  for (const player of room.players.values()) {
+    send(player.socket, { type: "standings_update", players });
+  }
 }
 
 function makeRoomCode() {
@@ -99,6 +148,7 @@ async function authenticatePlayer(token: string | undefined) {
   return {
     userId: user.id as number,
     username: user.username as string,
+    displayName: user.display_name as string,
     role: normalizeRole(user.role),
   };
 }
@@ -155,7 +205,18 @@ export function attachLanServer(server: import("http").Server) {
             return;
           }
 
+          const matchConfig = normalizeMatchConfig({
+            wordSet: message.wordSet || "General",
+            difficulty: message.difficulty || "Normal",
+            roundTime: message.roundTime || 90,
+          });
+          if (!matchConfig) {
+            send(socket, { type: "error", message: "Invalid classroom match configuration." });
+            return;
+          }
+
           player.name = identity.username;
+          player.displayName = identity.displayName;
           player.isHost = true;
           player.userId = identity.userId;
           player.role = identity.role;
@@ -168,6 +229,7 @@ export function attachLanServer(server: import("http").Server) {
             roundTime: message.roundTime || 90,
             started: false,
             ownerUserId: identity.userId,
+            matchConfig,
             players: new Map([[player.id, player]]),
           };
           rooms.set(room.code, room);
@@ -207,6 +269,7 @@ export function attachLanServer(server: import("http").Server) {
           }
 
           player.name = identity.username;
+          player.displayName = identity.displayName;
           player.userId = identity.userId;
           player.role = identity.role;
           player.isHost = reconnectingHost;
@@ -235,7 +298,30 @@ export function attachLanServer(server: import("http").Server) {
           return;
         }
 
-        if (message.type === "cancel_room") {
+        if (message.type === "update_match_config") {
+          const identity = await authenticatePlayer(message.token);
+          if (!identity || identity.role !== "teacher" || identity.userId !== room.ownerUserId || player.userId !== room.ownerUserId) {
+            send(socket, { type: "error", message: "Only the teacher who owns this classroom can update match settings." });
+            return;
+          }
+          if (room.started) {
+            send(socket, { type: "error", message: "Match settings cannot change after the classroom starts." });
+            return;
+          }
+
+          const matchConfig = normalizeMatchConfig(message);
+          if (!matchConfig) {
+            send(socket, { type: "error", message: "Invalid category, difficulty, or round time." });
+            return;
+          }
+
+          room.matchConfig = matchConfig;
+          room.wordSet = matchConfig.wordSet;
+          room.difficulty = matchConfig.difficulty;
+          room.roundTime = matchConfig.roundTime;
+          room.wordSequence = undefined;
+          broadcast(room);
+        } else if (message.type === "cancel_room") {
           const identity = await authenticatePlayer(message.token);
           if (!identity || identity.role !== "teacher" || identity.userId !== room.ownerUserId || player.userId !== room.ownerUserId) {
             send(socket, { type: "error", message: "Only the teacher who owns this classroom can cancel it." });
@@ -262,17 +348,43 @@ export function attachLanServer(server: import("http").Server) {
             send(socket, { type: "error", message: "All students must be ready before the teacher starts the session." });
             return;
           }
+          if (!room.matchConfig) {
+            send(socket, { type: "error", message: "A valid classroom match configuration is required." });
+            return;
+          }
           room.started = true;
+          room.startAt = Date.now() + COUNTDOWN_DELAY_MS;
+          room.wordSequence = createWordSequence(room.matchConfig);
           for (const participant of room.players.values()) {
-            send(participant.socket, { type: "room_started", roomCode: room.code });
+            send(participant.socket, {
+              type: "room_started",
+              roomCode: room.code,
+              matchConfig: room.matchConfig,
+              wordSequence: room.wordSequence,
+              startAt: room.startAt,
+            });
           }
           broadcast(room);
         } else if (message.type === "score_update") {
-          if (!player.userId || !room.dbMatchId) return;
-          await getDatabase().run(
-            `UPDATE match_participants SET score = ?, wpm = ?, accuracy = ? WHERE match_id = ? AND user_id = ?`,
-            [message.score || 0, message.wpm || 0, message.accuracy || 0, room.dbMatchId, player.userId],
-          );
+          if (player.role !== "student" || !player.userId || !room.started) return;
+          if (message.roomCode && message.roomCode !== room.code) {
+            send(socket, { type: "error", message: "Performance room does not match the active room." });
+            return;
+          }
+
+          const score = message.score;
+          const wpm = message.wpm;
+          const accuracy = message.accuracy;
+          const lives = message.lives;
+          const completedWords = message.completedWords;
+          const finished = message.finished;
+          if (typeof score !== "number" || typeof wpm !== "number" || typeof accuracy !== "number" || typeof lives !== "number" || typeof completedWords !== "number" || typeof finished !== "boolean" || !Number.isFinite(score) || !Number.isFinite(wpm) || !Number.isFinite(accuracy) || !Number.isFinite(lives) || !Number.isFinite(completedWords) || !Number.isInteger(lives) || !Number.isInteger(completedWords) || wpm < 0 || accuracy < 0 || accuracy > 100 || lives < 0 || lives > 3 || completedWords < 0) {
+            send(socket, { type: "error", message: "Invalid performance update." });
+            return;
+          }
+
+          player.performance = { score, wpm, accuracy, lives, completedWords, finished };
+          broadcastStandings(room);
         }
       } catch (error) {
         console.error("LAN message error:", error);
@@ -284,4 +396,25 @@ export function attachLanServer(server: import("http").Server) {
   });
 
   return webSocketServer;
+}
+
+function normalizeMatchConfig(input: { wordSet?: string; difficulty?: string; roundTime?: number }): ClassroomMatchConfig | null {
+  const difficultyKey = input.difficulty ? getDifficultyKey(input.difficulty) : null;
+  const wordSet = input.wordSet ? getWordCategory(input.wordSet) : null;
+  const roundTime = input.roundTime;
+  if (!difficultyKey || !wordSet || !SUPPORTED_ROUND_TIMES.includes(roundTime as (typeof SUPPORTED_ROUND_TIMES)[number])) return null;
+
+  return {
+    wordSet,
+    difficulty: difficultyKey === "easy" ? "Easy" : difficultyKey === "normal" ? "Normal" : "Hard",
+    roundTime: roundTime as (typeof SUPPORTED_ROUND_TIMES)[number],
+  };
+}
+
+function createWordSequence(config: ClassroomMatchConfig): string[] {
+  const difficulty = getDifficultyKey(config.difficulty);
+  if (!difficulty) return [];
+  const pool = getWordsForDifficulty(config.wordSet, difficulty);
+  const length = Math.max(12, Math.ceil(config.roundTime / 3));
+  return Array.from({ length }, (_, index) => pool[index % pool.length]);
 }

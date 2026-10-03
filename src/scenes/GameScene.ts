@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getWordCategory, WORD_BANK } from "../words";
+import { getWordCategory, getWordsForDifficulty, type WordCategory } from "../words";
 import { PauseMenu } from "./game/PauseMenu";
 import { getLaneX, pickLaneNotSame, type Lane } from "./game/lanes";
 import { WaterEffects, WATER_TEXTURE_KEY } from "./game/WaterEffects";
@@ -20,9 +20,25 @@ export type GameResult = {
   wordSet: string;
 };
 
+export type GameMode = "solo" | "multiplayer";
+
+export type GamePerformance = {
+  score: number;
+  wpm: number;
+  accuracy: number;
+  lives: number;
+  completedWords: number;
+  finished: boolean;
+};
+
 type GameSceneInitData = {
+  mode?: GameMode;
+  roomCode?: string;
   matchConfig: MatchConfig;
   onGameOver: (result: GameResult) => void;
+  onPerformance?: (performance: GamePerformance) => void;
+  wordSequence?: string[];
+  startAt?: number;
 };
 
 export default class GameScene extends Phaser.Scene {
@@ -52,6 +68,11 @@ export default class GameScene extends Phaser.Scene {
   private waterEffects!: WaterEffects;
   private matchConfig!: MatchConfig;
   private onGameOver!: (result: GameResult) => void;
+  private onPerformance?: (performance: GamePerformance) => void;
+  private lastPerformanceReportSecond = -1;
+  private gameMode: GameMode = "solo";
+  private multiplayerWordSequence: string[] = [];
+  private multiplayerWordIndex = 0;
 
   private activeWord = "";
   private typedText = "";
@@ -64,7 +85,7 @@ export default class GameScene extends Phaser.Scene {
   private completedCharacters = 0;
   private lives = 3;
   private difficultyKey: keyof typeof GameScene.DIFFICULTY_CONFIG = "normal";
-  private wordCategory = "general" as keyof typeof WORD_BANK;
+  private wordCategory: WordCategory = "general";
   private endReason: "time" | "health" = "time";
   private gameOver = false;
   private wordX = 0;
@@ -75,9 +96,13 @@ export default class GameScene extends Phaser.Scene {
     super("GameScene");
   }
 
-  init({ matchConfig, onGameOver }: GameSceneInitData): void {
+  init({ mode = "solo", matchConfig, onGameOver, onPerformance, wordSequence }: GameSceneInitData): void {
+    this.gameMode = mode;
+    this.multiplayerWordSequence = wordSequence && wordSequence.length > 0 ? [...wordSequence] : [];
+    this.multiplayerWordIndex = 0;
     this.matchConfig = matchConfig;
     this.onGameOver = onGameOver;
+    this.onPerformance = onPerformance;
     this.matchDurationSeconds = matchConfig.roundTime;
     this.remainingSeconds = this.matchDurationSeconds;
     this.difficultyKey = this.getDifficultyKey(matchConfig.difficulty);
@@ -140,6 +165,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.spawnWord();
     this.updateHud();
+    this.reportPerformance();
 
     this.input.keyboard?.on("keydown", (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -167,6 +193,7 @@ export default class GameScene extends Phaser.Scene {
     this.elapsedSeconds = Math.min(this.matchDurationSeconds, this.elapsedSeconds + dt);
     this.remainingSeconds = Math.max(0, this.matchDurationSeconds - this.elapsedSeconds);
     this.updateHud();
+    this.reportPerformance();
 
     if (this.remainingSeconds <= 0) {
       this.endMatch();
@@ -183,14 +210,15 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private spawnWord(): void {
-    const difficulty = GameScene.DIFFICULTY_CONFIG[this.difficultyKey];
-    const categoryWords = WORD_BANK[this.wordCategory];
-    const candidates = categoryWords.filter(
-      (word) => word.length >= difficulty.minimumLength && word.length <= difficulty.maximumLength,
-    );
-    const wordPool = candidates.length > 0 ? candidates : categoryWords;
-    const index = Phaser.Math.Between(0, wordPool.length - 1);
-    this.activeWord = wordPool[index];
+    if (this.gameMode === "multiplayer") {
+      const sequence = this.multiplayerWordSequence.length > 0 ? this.multiplayerWordSequence : ["type"];
+      this.activeWord = sequence[this.multiplayerWordIndex % sequence.length];
+      this.multiplayerWordIndex += 1;
+    } else {
+      const wordPool = getWordsForDifficulty(this.wordCategory, this.difficultyKey);
+      const index = Phaser.Math.Between(0, wordPool.length - 1);
+      this.activeWord = wordPool[index];
+    }
 
     this.typedText = "";
     this.typedDisplay.setText("");
@@ -307,8 +335,26 @@ export default class GameScene extends Phaser.Scene {
     );
   }
 
+  private reportPerformance(force = false): void {
+    if (this.gameMode !== "multiplayer" || !this.onPerformance) return;
+    if (!force && Math.floor(this.elapsedSeconds) <= this.lastPerformanceReportSecond) return;
+    this.lastPerformanceReportSecond = Math.floor(this.elapsedSeconds);
+
+    const elapsedMinutes = this.elapsedSeconds / 60;
+    const totalKeystrokes = this.correctKeystrokes + this.incorrectKeystrokes;
+    this.onPerformance({
+      score: this.score,
+      wpm: elapsedMinutes > 0 ? this.completedCharacters / 5 / elapsedMinutes : 0,
+      accuracy: totalKeystrokes > 0 ? (this.correctKeystrokes / totalKeystrokes) * 100 : 0,
+      lives: this.lives,
+      completedWords: this.completedWords,
+      finished: this.gameOver,
+    });
+  }
+
   private endMatch(): void {
     this.gameOver = true;
+    this.reportPerformance(true);
     const elapsedMinutes = this.elapsedSeconds / 60;
     const wpm = elapsedMinutes > 0 ? this.completedCharacters / 5 / elapsedMinutes : 0;
     const totalKeystrokes = this.correctKeystrokes + this.incorrectKeystrokes;
@@ -329,9 +375,10 @@ export default class GameScene extends Phaser.Scene {
       wordSet: this.matchConfig.wordSet,
     });
 
+    const completionMessage = this.gameMode === "multiplayer" ? "\nWaiting for other players..." : "";
     this.gameOverDisplay
       .setText(
-        `GAME OVER\n\nReason: ${this.endReason === "health" ? "Health depleted" : "Time expired"}\nScore: ${this.score}\nWPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%\nError Rate: ${errorRate.toFixed(1)}%\nCompleted words: ${this.completedWords}\nLives: ${this.lives}`,
+        `GAME OVER\n\nReason: ${this.endReason === "health" ? "Health depleted" : "Time expired"}\nScore: ${this.score}\nWPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%\nError Rate: ${errorRate.toFixed(1)}%\nCompleted words: ${this.completedWords}\nLives: ${this.lives}${completionMessage}`,
       )
       .setVisible(true);
   }

@@ -21,9 +21,27 @@ import TeacherDashboard from "./pages/TeacherDashboard";
 
 function GameRoute() {
   const location = useLocation();
-  const state = location.state as { matchConfig?: typeof mockMatchConfig; matchId?: number } | null;
+  const state = location.state as {
+    mode?: "solo" | "multiplayer";
+    roomCode?: string;
+    hostAddress?: string;
+    matchConfig?: typeof mockMatchConfig;
+    matchId?: number;
+    wordSequence?: string[];
+    startAt?: number;
+  } | null;
 
-  return <Game matchConfig={state?.matchConfig ?? mockMatchConfig} matchId={state?.matchId} />;
+  return (
+    <Game
+      mode={state?.mode ?? "solo"}
+      roomCode={state?.roomCode}
+      hostAddress={state?.hostAddress}
+      matchConfig={state?.matchConfig ?? mockMatchConfig}
+      matchId={state?.matchId}
+      wordSequence={state?.wordSequence}
+      startAt={state?.startAt}
+    />
+  );
 }
 
 function DashboardRoute() {

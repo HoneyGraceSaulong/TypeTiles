@@ -1,0 +1,837 @@
+diff --git a/server/src/lan.ts b/server/src/lan.ts
+index 13a79b1..95233d8 100644
+--- a/server/src/lan.ts
++++ b/server/src/lan.ts
+@@ -3,17 +3,29 @@ import { IncomingMessage } from "http";
+ import { WebSocket, WebSocketServer } from "ws";
+ import { getDatabase } from "./db.js";
+ import { normalizeRole, verifyToken, type AppRole } from "./auth.js";
++import { getDifficultyKey, getWordsForDifficulty, getWordCategory, type WordCategory } from "./wordBank.js";
+ 
+ const MAX_PLAYERS = 8;
++const COUNTDOWN_DELAY_MS = 3000;
++const SUPPORTED_ROUND_TIMES = [30, 60, 90] as const;
++
++type ClassroomMatchConfig = {
++  wordSet: WordCategory;
++  difficulty: "Easy" | "Normal" | "Hard";
++  roundTime: (typeof SUPPORTED_ROUND_TIMES)[number];
++};
+ 
+ type ClientMessage = {
+-  type: "create_room" | "join_room" | "leave_room" | "cancel_room" | "ready" | "start_game" | "score_update";
++  type: "create_room" | "join_room" | "leave_room" | "cancel_room" | "update_match_config" | "ready" | "start_game" | "score_update";
+   roomCode?: string;
+   playerName?: string;
+   token?: string;
+   score?: number;
+   wpm?: number;
+   accuracy?: number;
++  lives?: number;
++  completedWords?: number;
++  finished?: boolean;
+   mode?: string;
+   difficulty?: string;
+   wordSet?: string;
+@@ -23,11 +35,22 @@ type ClientMessage = {
+ type Player = {
+   id: string;
+   name: string;
++  displayName?: string;
+   userId?: number;
+   role?: AppRole;
+   ready: boolean;
+   isHost: boolean;
+   socket: WebSocket;
++  performance?: PlayerPerformance;
++};
++
++type PlayerPerformance = {
++  score: number;
++  wpm: number;
++  accuracy: number;
++  lives: number;
++  completedWords: number;
++  finished: boolean;
+ };
+ 
+ type Room = {
+@@ -39,6 +62,9 @@ type Room = {
+   roundTime: number;
+   started: boolean;
+   ownerUserId: number;
++  matchConfig: ClassroomMatchConfig;
++  wordSequence?: string[];
++  startAt?: number;
+   players: Map<string, Player>;
+ };
+ 
+@@ -58,6 +84,8 @@ function roomState(room: Room) {
+     difficulty: room.difficulty,
+     wordSet: room.wordSet,
+     roundTime: room.roundTime,
++    matchConfig: room.matchConfig,
++    startAt: room.startAt,
+     started: room.started,
+     maxPlayers: MAX_PLAYERS,
+     players: [...room.players.values()].map(({ id, name, userId, ready, isHost }) => ({ id, name, userId, ready, isHost })),
+@@ -69,6 +97,27 @@ function broadcast(room: Room) {
+   for (const player of room.players.values()) send(player.socket, state);
+ }
+ 
++function broadcastStandings(room: Room) {
++  const players = [...room.players.values()]
++    .filter((player) => player.userId !== undefined)
++    .map((player) => ({
++      userId: player.userId,
++      username: player.name,
++      displayName: player.displayName || player.name,
++      score: player.performance?.score || 0,
++      wpm: player.performance?.wpm || 0,
++      accuracy: player.performance?.accuracy || 0,
++      lives: player.performance?.lives ?? 3,
++      completedWords: player.performance?.completedWords || 0,
++      finished: player.performance?.finished || false,
++    }))
++    .sort((left, right) => right.score - left.score || right.wpm - left.wpm || right.accuracy - left.accuracy);
++
++  for (const player of room.players.values()) {
++    send(player.socket, { type: "standings_update", players });
++  }
++}
++
+ function makeRoomCode() {
+   let code = "";
+   do {
+@@ -99,6 +148,7 @@ async function authenticatePlayer(token: string | undefined) {
+   return {
+     userId: user.id as number,
+     username: user.username as string,
++    displayName: user.display_name as string,
+     role: normalizeRole(user.role),
+   };
+ }
+@@ -155,7 +205,18 @@ export function attachLanServer(server: import("http").Server) {
+             return;
+           }
+ 
++          const matchConfig = normalizeMatchConfig({
++            wordSet: message.wordSet || "General",
++            difficulty: message.difficulty || "Normal",
++            roundTime: message.roundTime || 90,
++          });
++          if (!matchConfig) {
++            send(socket, { type: "error", message: "Invalid classroom match configuration." });
++            return;
++          }
++
+           player.name = identity.username;
++          player.displayName = identity.displayName;
+           player.isHost = true;
+           player.userId = identity.userId;
+           player.role = identity.role;
+@@ -168,6 +229,7 @@ export function attachLanServer(server: import("http").Server) {
+             roundTime: message.roundTime || 90,
+             started: false,
+             ownerUserId: identity.userId,
++            matchConfig,
+             players: new Map([[player.id, player]]),
+           };
+           rooms.set(room.code, room);
+@@ -207,6 +269,7 @@ export function attachLanServer(server: import("http").Server) {
+           }
+ 
+           player.name = identity.username;
++          player.displayName = identity.displayName;
+           player.userId = identity.userId;
+           player.role = identity.role;
+           player.isHost = reconnectingHost;
+@@ -235,7 +298,30 @@ export function attachLanServer(server: import("http").Server) {
+           return;
+         }
+ 
+-        if (message.type === "cancel_room") {
++        if (message.type === "update_match_config") {
++          const identity = await authenticatePlayer(message.token);
++          if (!identity || identity.role !== "teacher" || identity.userId !== room.ownerUserId || player.userId !== room.ownerUserId) {
++            send(socket, { type: "error", message: "Only the teacher who owns this classroom can update match settings." });
++            return;
++          }
++          if (room.started) {
++            send(socket, { type: "error", message: "Match settings cannot change after the classroom starts." });
++            return;
++          }
++
++          const matchConfig = normalizeMatchConfig(message);
++          if (!matchConfig) {
++            send(socket, { type: "error", message: "Invalid category, difficulty, or round time." });
++            return;
++          }
++
++          room.matchConfig = matchConfig;
++          room.wordSet = matchConfig.wordSet;
++          room.difficulty = matchConfig.difficulty;
++          room.roundTime = matchConfig.roundTime;
++          room.wordSequence = undefined;
++          broadcast(room);
++        } else if (message.type === "cancel_room") {
+           const identity = await authenticatePlayer(message.token);
+           if (!identity || identity.role !== "teacher" || identity.userId !== room.ownerUserId || player.userId !== room.ownerUserId) {
+             send(socket, { type: "error", message: "Only the teacher who owns this classroom can cancel it." });
+@@ -262,17 +348,43 @@ export function attachLanServer(server: import("http").Server) {
+             send(socket, { type: "error", message: "All students must be ready before the teacher starts the session." });
+             return;
+           }
++          if (!room.matchConfig) {
++            send(socket, { type: "error", message: "A valid classroom match configuration is required." });
++            return;
++          }
+           room.started = true;
++          room.startAt = Date.now() + COUNTDOWN_DELAY_MS;
++          room.wordSequence = createWordSequence(room.matchConfig);
+           for (const participant of room.players.values()) {
+-            send(participant.socket, { type: "room_started", roomCode: room.code });
++            send(participant.socket, {
++              type: "room_started",
++              roomCode: room.code,
++              matchConfig: room.matchConfig,
++              wordSequence: room.wordSequence,
++              startAt: room.startAt,
++            });
+           }
+           broadcast(room);
+         } else if (message.type === "score_update") {
+-          if (!player.userId || !room.dbMatchId) return;
+-          await getDatabase().run(
+-            `UPDATE match_participants SET score = ?, wpm = ?, accuracy = ? WHERE match_id = ? AND user_id = ?`,
+-            [message.score || 0, message.wpm || 0, message.accuracy || 0, room.dbMatchId, player.userId],
+-          );
++          if (!player.userId || !room.started) return;
++          if (message.roomCode && message.roomCode !== room.code) {
++            send(socket, { type: "error", message: "Performance room does not match the active room." });
++            return;
++          }
++
++          const score = message.score;
++          const wpm = message.wpm;
++          const accuracy = message.accuracy;
++          const lives = message.lives;
++          const completedWords = message.completedWords;
++          const finished = message.finished;
++          if (typeof score !== "number" || typeof wpm !== "number" || typeof accuracy !== "number" || typeof lives !== "number" || typeof completedWords !== "number" || typeof finished !== "boolean" || !Number.isFinite(score) || !Number.isFinite(wpm) || !Number.isFinite(accuracy) || !Number.isFinite(lives) || !Number.isFinite(completedWords) || !Number.isInteger(lives) || !Number.isInteger(completedWords) || wpm < 0 || accuracy < 0 || accuracy > 100 || lives < 0 || lives > 3 || completedWords < 0) {
++            send(socket, { type: "error", message: "Invalid performance update." });
++            return;
++          }
++
++          player.performance = { score, wpm, accuracy, lives, completedWords, finished };
++          broadcastStandings(room);
+         }
+       } catch (error) {
+         console.error("LAN message error:", error);
+@@ -284,4 +396,25 @@ export function attachLanServer(server: import("http").Server) {
+   });
+ 
+   return webSocketServer;
++}
++
++function normalizeMatchConfig(input: { wordSet?: string; difficulty?: string; roundTime?: number }): ClassroomMatchConfig | null {
++  const difficultyKey = input.difficulty ? getDifficultyKey(input.difficulty) : null;
++  const wordSet = input.wordSet ? getWordCategory(input.wordSet) : null;
++  const roundTime = input.roundTime;
++  if (!difficultyKey || !wordSet || !SUPPORTED_ROUND_TIMES.includes(roundTime as (typeof SUPPORTED_ROUND_TIMES)[number])) return null;
++
++  return {
++    wordSet,
++    difficulty: difficultyKey === "easy" ? "Easy" : difficultyKey === "normal" ? "Normal" : "Hard",
++    roundTime: roundTime as (typeof SUPPORTED_ROUND_TIMES)[number],
++  };
++}
++
++function createWordSequence(config: ClassroomMatchConfig): string[] {
++  const difficulty = getDifficultyKey(config.difficulty);
++  if (!difficulty) return [];
++  const pool = getWordsForDifficulty(config.wordSet, difficulty);
++  const length = Math.max(12, Math.ceil(config.roundTime / 3));
++  return Array.from({ length }, (_, index) => pool[index % pool.length]);
+ }
+\ No newline at end of file
+diff --git a/src/App.tsx b/src/App.tsx
+index fa50081..a80ace0 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -21,9 +21,27 @@ import TeacherDashboard from "./pages/TeacherDashboard";
+ 
+ function GameRoute() {
+   const location = useLocation();
+-  const state = location.state as { matchConfig?: typeof mockMatchConfig; matchId?: number } | null;
++  const state = location.state as {
++    mode?: "solo" | "multiplayer";
++    roomCode?: string;
++    hostAddress?: string;
++    matchConfig?: typeof mockMatchConfig;
++    matchId?: number;
++    wordSequence?: string[];
++    startAt?: number;
++  } | null;
+ 
+-  return <Game matchConfig={state?.matchConfig ?? mockMatchConfig} matchId={state?.matchId} />;
++  return (
++    <Game
++      mode={state?.mode ?? "solo"}
++      roomCode={state?.roomCode}
++      hostAddress={state?.hostAddress}
++      matchConfig={state?.matchConfig ?? mockMatchConfig}
++      matchId={state?.matchId}
++      wordSequence={state?.wordSequence}
++      startAt={state?.startAt}
++    />
++  );
+ }
+ 
+ function DashboardRoute() {
+diff --git a/src/components/GameMount.tsx b/src/components/GameMount.tsx
+index f326692..886269a 100644
+--- a/src/components/GameMount.tsx
++++ b/src/components/GameMount.tsx
+@@ -2,15 +2,30 @@ import Phaser from "phaser";
+ import { useEffect, useRef } from "react";
+ import MatchHudScene from "../scenes/match_hud";
+ import type { MatchConfig } from "../lib/mockData";
+-import type { GameResult } from "../scenes/GameScene";
++import type { GamePerformance, GameResult } from "../scenes/GameScene";
+ 
+ type Props = {
++  mode?: "solo" | "multiplayer";
++  roomCode?: string;
+   matchConfig: MatchConfig;
+   onGameOver: (result: GameResult) => void;
++  onPerformance?: (performance: GamePerformance) => void;
++  wordSequence?: string[];
++  startAt?: number;
+ };
+ 
+-export function GameMount({ matchConfig, onGameOver }: Props) {
++export function GameMount({ mode = "solo", roomCode, matchConfig, onGameOver, onPerformance, wordSequence, startAt }: Props) {
+   const hostRef = useRef<HTMLDivElement | null>(null);
++  const onGameOverRef = useRef(onGameOver);
++  const onPerformanceRef = useRef(onPerformance);
++
++  useEffect(() => {
++    onGameOverRef.current = onGameOver;
++  }, [onGameOver]);
++
++  useEffect(() => {
++    onPerformanceRef.current = onPerformance;
++  }, [onPerformance]);
+ 
+   useEffect(() => {
+     const host = hostRef.current;
+@@ -38,8 +53,13 @@ export function GameMount({ matchConfig, onGameOver }: Props) {
+     // Add and start the Phaser scene.
+     // matchConfig is passed to GameScene.init().
+     game.scene.add("GameScene", MatchHudScene, true, {
++      mode,
++      roomCode,
+       matchConfig,
+-      onGameOver,
++      onGameOver: (result: GameResult) => onGameOverRef.current(result),
++      onPerformance: (performance: GamePerformance) => onPerformanceRef.current?.(performance),
++      wordSequence,
++      startAt,
+     });
+ 
+     // Keep the Phaser canvas responsive when the window changes size.
+@@ -54,7 +74,7 @@ export function GameMount({ matchConfig, onGameOver }: Props) {
+       window.removeEventListener("resize", resize);
+       game.destroy(true);
+     };
+-  }, [matchConfig, onGameOver]);
++  }, [matchConfig, mode, roomCode, startAt, wordSequence]);
+ 
+   return (
+     <div className="relative min-h-0 flex-1 overflow-hidden rounded-[2rem] border border-white/10 bg-black/30">
+diff --git a/src/pages/Game.tsx b/src/pages/Game.tsx
+index 6007fe5..583719d 100644
+--- a/src/pages/Game.tsx
++++ b/src/pages/Game.tsx
+@@ -1,20 +1,83 @@
+ import { GameMount } from "../components/GameMount";
+ import type { MatchConfig } from "../lib/mockData";
+ import { useNavigate } from "react-router-dom";
+-import { useRef } from "react";
+-import type { GameResult } from "../scenes/GameScene";
++import { useEffect, useRef, useState } from "react";
++import type { GamePerformance, GameResult } from "../scenes/GameScene";
+ import { submitPlayerMatchResult } from "../lib/playerApi";
++import { PLAYER_TOKEN_KEY } from "../lib/playerApi";
++import { usePlayerAuth } from "../lib/PlayerAuthContext";
+ 
+ type Props = {
++  mode?: "solo" | "multiplayer";
++  roomCode?: string;
++  hostAddress?: string;
+   matchConfig: MatchConfig;
+   matchId?: number;
++  wordSequence?: string[];
++  startAt?: number;
+ };
+ 
+-export default function Game({ matchConfig, matchId }: Props) {
++type Standing = {
++  userId: number;
++  username: string;
++  displayName: string;
++  score: number;
++  wpm: number;
++  accuracy: number;
++  lives: number;
++  completedWords: number;
++  finished: boolean;
++};
++
++export default function Game({ mode = "solo", roomCode, hostAddress, matchConfig, matchId, wordSequence, startAt }: Props) {
+   const navigate = useNavigate();
++  const { user } = usePlayerAuth();
+   const submissionStartedRef = useRef(false);
++  const socketRef = useRef<WebSocket | null>(null);
++  const joinedRoomRef = useRef(false);
++  const latestPerformanceRef = useRef<GamePerformance | null>(null);
++  const [standings, setStandings] = useState<Standing[]>([]);
++  const [multiplayerResult, setMultiplayerResult] = useState<GameResult | null>(null);
++
++  useEffect(() => {
++    if (mode !== "multiplayer" || !roomCode || !hostAddress) return;
++
++    const socket = new WebSocket(`ws://${hostAddress.replace(/^https?:\/\//, "")}/ws`);
++    socketRef.current = socket;
++    socket.onopen = () => {
++      const token = localStorage.getItem(PLAYER_TOKEN_KEY);
++      socket.send(JSON.stringify({ type: "join_room", roomCode, token }));
++    };
++    socket.onmessage = (event) => {
++      const message = JSON.parse(event.data) as { type?: string; players?: Standing[] };
++      if (message.type === "room_joined") {
++        joinedRoomRef.current = true;
++        if (latestPerformanceRef.current) {
++          socket.send(JSON.stringify({ type: "score_update", roomCode, ...latestPerformanceRef.current }));
++        }
++      }
++      if (message.type === "standings_update") setStandings(message.players || []);
++    };
++
++    return () => {
++      socket.close();
++      socketRef.current = null;
++      joinedRoomRef.current = false;
++    };
++  }, [hostAddress, mode, roomCode]);
++
++  const handlePerformance = (performance: GamePerformance) => {
++    latestPerformanceRef.current = performance;
++    if (socketRef.current?.readyState !== WebSocket.OPEN || !joinedRoomRef.current || !roomCode) return;
++    socketRef.current.send(JSON.stringify({ type: "score_update", roomCode, ...performance }));
++  };
+ 
+   const handleGameOver = async (result: GameResult) => {
++    if (mode === "multiplayer") {
++      setMultiplayerResult(result);
++      return;
++    }
++
+     if (submissionStartedRef.current) return;
+     submissionStartedRef.current = true;
+ 
+@@ -37,7 +100,7 @@ export default function Game({ matchConfig, matchId }: Props) {
+   };
+ 
+   return (
+-    <section className="flex h-full min-h-0 flex-col gap-4">
++    <section className="relative flex h-full min-h-0 flex-col gap-4">
+       <div className="hud-panel rounded-[2rem] px-5 py-4">
+         <div className="text-xs uppercase tracking-[0.35em] text-emerald-300">Match</div>
+         <div className="mt-2 flex flex-wrap gap-2 text-sm text-slate-300">
+@@ -48,10 +111,25 @@ export default function Game({ matchConfig, matchId }: Props) {
+         </div>
+       </div>
+ 
+-      <GameMount
+-        matchConfig={matchConfig}
+-        onGameOver={handleGameOver}
+-      />
++      <div className="flex min-h-0 min-w-0 flex-1 gap-4">
++        <GameMount
++          mode={mode}
++          roomCode={roomCode}
++          matchConfig={matchConfig}
++          wordSequence={wordSequence}
++          startAt={startAt}
++          onGameOver={handleGameOver}
++          onPerformance={handlePerformance}
++        />
++        {mode === "multiplayer" && user?.role === "teacher" ? (
++          <div className="w-[min(24rem,32%)] shrink-0 overflow-y-auto rounded-2xl border border-white/10 bg-black/75 p-3 text-xs text-white shadow-xl">
++          <div className="mb-2 text-xs uppercase tracking-[0.25em] text-emerald-300">Live Standings</div>
++          <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2 border-b border-white/10 pb-2 text-slate-400"><span>Player</span><span>Score</span><span>WPM</span><span>Acc</span><span>Lives</span></div>
++          <div className="mt-2 space-y-2">{standings.map((standing) => <div key={standing.userId} className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-2"><span className="truncate">{standing.displayName || standing.username}{standing.finished ? " (Finished)" : ""}</span><span>{standing.score}</span><span>{standing.wpm.toFixed(0)}</span><span>{standing.accuracy.toFixed(0)}%</span><span>{standing.lives}</span></div>)}</div>
++          </div>
++        ) : null}
++      </div>
++      {multiplayerResult ? <div className="pointer-events-none absolute left-1/2 top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-emerald-400/40 bg-black/80 px-6 py-4 text-center text-white"><div className="text-xs uppercase tracking-[0.3em] text-emerald-300">Match Complete</div><div className="mt-2 text-sm">Waiting for other players...</div></div> : null}
+     </section>
+   );
+ }
+\ No newline at end of file
+diff --git a/src/pages/Lobby.tsx b/src/pages/Lobby.tsx
+index ec451e2..f71338e 100644
+--- a/src/pages/Lobby.tsx
++++ b/src/pages/Lobby.tsx
+@@ -4,10 +4,12 @@ import { ArrowRight, Check, Copy, Users, Wifi } from "lucide-react";
+ import { useNavigate } from "react-router-dom";
+ import { PLAYER_TOKEN_KEY } from "../lib/playerApi";
+ import { usePlayerAuth } from "../lib/PlayerAuthContext";
++import { WORD_CATEGORIES, type WordCategory } from "../words";
+ 
+ type Player = { id: string; name: string; userId?: number; ready: boolean; isHost: boolean };
+-type RoomState = { roomCode: string; started: boolean; maxPlayers: number; players: Player[] };
+-type SocketMessage = RoomState & { type: string; message?: string; playerId?: string };
++type ClassroomMatchConfig = { wordSet: WordCategory; difficulty: "Easy" | "Normal" | "Hard"; roundTime: 30 | 60 | 90 };
++type RoomState = { roomCode: string; started: boolean; startAt?: number; maxPlayers: number; players: Player[]; matchConfig: ClassroomMatchConfig };
++type SocketMessage = RoomState & { type: string; message?: string; playerId?: string; matchConfig?: ClassroomMatchConfig; wordSequence?: string[]; startAt?: number };
+ 
+ const defaultHost = "localhost:3001";
+ const LAN_ROOM_CODE_KEY = "type_tiles_lan_room_code";
+@@ -18,10 +20,13 @@ export default function Lobby() {
+   const socketRef = useRef<WebSocket | null>(null);
+   const pendingMessageRef = useRef<object | null>(null);
+   const pendingAfterReconnectRef = useRef<object | null>(null);
++  const activeMatchRef = useRef(false);
+   const [hostAddress, setHostAddress] = useState(defaultHost);
+   const [playerName, setPlayerName] = useState(user?.displayName || user?.username || "Player");
+   const [roomCode, setRoomCode] = useState(() => localStorage.getItem(LAN_ROOM_CODE_KEY) || "");
+   const [room, setRoom] = useState<RoomState | null>(null);
++  const [wordSequence, setWordSequence] = useState<string[]>([]);
++  const [countdown, setCountdown] = useState(0);
+   const [error, setError] = useState("");
+   const [status, setStatus] = useState<"idle" | "connecting" | "connected">("idle");
+ 
+@@ -47,7 +52,8 @@ export default function Lobby() {
+         localStorage.setItem(LAN_ROOM_CODE_KEY, message.roomCode);
+       }
+       if (message.type === "room_started") {
+-        setRoom((currentRoom) => currentRoom ? { ...currentRoom, started: true } : currentRoom);
++        setRoom((currentRoom) => currentRoom && message.matchConfig ? { ...currentRoom, started: true, startAt: message.startAt, matchConfig: message.matchConfig } : currentRoom);
++        setWordSequence(message.wordSequence || []);
+       }
+       if (message.type === "room_created" || message.type === "room_joined") {
+         setRoomCode(message.roomCode);
+@@ -60,12 +66,14 @@ export default function Lobby() {
+       }
+       if (message.type === "room_closed") {
+         setRoom(null);
++        setWordSequence([]);
+         setRoomCode("");
+         localStorage.removeItem(LAN_ROOM_CODE_KEY);
+         setError(message.message || "The classroom is no longer available.");
+       }
+       if (message.type === "room_cancelled") {
+         setRoom(null);
++        setWordSequence([]);
+         setRoomCode("");
+         localStorage.removeItem(LAN_ROOM_CODE_KEY);
+         setError(message.message || "The classroom was cancelled.");
+@@ -76,6 +84,7 @@ export default function Lobby() {
+         const text = message.message || "Unable to connect to the room.";
+         if (text.includes("Room not found")) {
+           setRoom(null);
++          setWordSequence([]);
+           setRoomCode("");
+           localStorage.removeItem(LAN_ROOM_CODE_KEY);
+           setError("That classroom is no longer available. Enter a new room code.");
+@@ -91,7 +100,41 @@ export default function Lobby() {
+     socket.onclose = () => setStatus("idle");
+   };
+ 
+-  useEffect(() => () => socketRef.current?.close(), []);
++  useEffect(() => () => {
++    if (!activeMatchRef.current) socketRef.current?.close();
++  }, []);
++
++  useEffect(() => {
++    if (!room?.started || !room.startAt) return;
++    if (wordSequence.length === 0) {
++      setError("This match is already active and cannot currently be resumed after refresh.");
++      return;
++    }
++
++    let launched = false;
++    const launch = () => {
++      if (launched || !room.startAt) return;
++      const remaining = Math.max(0, room.startAt - Date.now());
++      setCountdown(Math.ceil(remaining / 1000));
++      if (remaining > 0) return;
++      launched = true;
++      activeMatchRef.current = true;
++      navigate("/app/game", {
++        state: {
++          mode: "multiplayer",
++          roomCode: room.roomCode,
++          hostAddress,
++          matchConfig: room.matchConfig,
++          wordSequence,
++          startAt: room.startAt,
++        },
++      });
++    };
++
++    launch();
++    const timer = window.setInterval(launch, 50);
++    return () => window.clearInterval(timer);
++  }, [navigate, room?.roomCode, room?.startAt, room?.started, room?.matchConfig, wordSequence]);
+ 
+   useEffect(() => {
+     const savedRoomCode = localStorage.getItem(LAN_ROOM_CODE_KEY);
+@@ -127,6 +170,16 @@ export default function Lobby() {
+     send({ type: "create_room", playerName, mode: "LAN Match", difficulty: "Normal", wordSet: "General", roundTime: 90 });
+   };
+ 
++  const updateMatchConfig = (config: Partial<ClassroomMatchConfig>) => {
++    if (!room || !currentPlayer?.isHost) return;
++    send({
++      type: "update_match_config",
++      wordSet: config.wordSet || room.matchConfig.wordSet,
++      difficulty: config.difficulty || room.matchConfig.difficulty,
++      roundTime: config.roundTime || room.matchConfig.roundTime,
++    });
++  };
++
+   const joinRoom = (event: FormEvent) => {
+     event.preventDefault();
+     if (!roomCode.trim()) {
+@@ -214,7 +267,16 @@ export default function Lobby() {
+           <div className="grid gap-8 lg:grid-cols-[1fr_555px]">
+             <div className="flex min-h-[380px] flex-col justify-between">
+               <div><div className="text-sm text-white/70">You have joined the session.</div><h1 className="mt-1 text-[1.55rem] font-semibold text-white sm:text-[1.85rem]">{room.started ? "Game Starting" : "Waiting Room"}</h1></div>
+-              <div><h2 className="text-[1.45rem] font-semibold text-[#6f9fff]">{room.started ? "Waiting for synchronized match..." : "Waiting for the teacher"}</h2><p className="mt-2 text-white/75">{room.started ? "The classroom is ready. Multiplayer gameplay synchronization will begin here." : "The game will start when the teacher starts the session."}</p></div>
++              <div className="rounded-[8px] border border-[#2c6db2] bg-[#1c2451] p-4 text-white">
++                <div className="text-xs uppercase tracking-[0.25em] text-slate-400">Match Settings</div>
++                <div className="mt-3 grid gap-3 sm:grid-cols-3">
++                  <label className="text-xs text-white/70">Category<select value={room.matchConfig.wordSet} disabled={!currentPlayer?.isHost || room.started} onChange={(event) => updateMatchConfig({ wordSet: event.target.value as WordCategory })} className="mt-1 w-full rounded bg-[#d7d7df] px-2 py-2 text-sm text-[#161a3b] disabled:opacity-70">{WORD_CATEGORIES.map((category) => <option key={category} value={category}>{category.charAt(0).toUpperCase() + category.slice(1)}</option>)}</select></label>
++                  <label className="text-xs text-white/70">Difficulty<select value={room.matchConfig.difficulty} disabled={!currentPlayer?.isHost || room.started} onChange={(event) => updateMatchConfig({ difficulty: event.target.value as ClassroomMatchConfig["difficulty"] })} className="mt-1 w-full rounded bg-[#d7d7df] px-2 py-2 text-sm text-[#161a3b] disabled:opacity-70">{["Easy", "Normal", "Hard"].map((difficulty) => <option key={difficulty} value={difficulty}>{difficulty}</option>)}</select></label>
++                  <label className="text-xs text-white/70">Round Time<select value={room.matchConfig.roundTime} disabled={!currentPlayer?.isHost || room.started} onChange={(event) => updateMatchConfig({ roundTime: Number(event.target.value) as ClassroomMatchConfig["roundTime"] })} className="mt-1 w-full rounded bg-[#d7d7df] px-2 py-2 text-sm text-[#161a3b] disabled:opacity-70">{[30, 60, 90].map((time) => <option key={time} value={time}>{time} seconds</option>)}</select></label>
++                </div>
++                {!currentPlayer?.isHost && !room.started ? <div className="mt-2 text-xs text-white/60">Match settings are controlled by the teacher.</div> : null}
++              </div>
++              <div><h2 className="text-[1.45rem] font-semibold text-[#6f9fff]">{room.started ? (countdown > 0 ? String(countdown) : "Waiting for synchronized match...") : "Waiting for the teacher"}</h2><p className="mt-2 text-white/75">{room.started ? "The classroom is preparing the synchronized match." : "The game will start when the teacher starts the session."}</p></div>
+               <div className="flex flex-wrap gap-3">{!room.started ? <button type="button" onClick={() => send({ type: "ready" })} className="inline-flex items-center gap-2 rounded-[7px] bg-[#2948aa] px-5 py-3 font-semibold text-white"><Check className="h-5 w-5" />{currentPlayer?.ready ? "Ready" : "Mark Ready"}</button> : null}{!room.started && currentPlayer?.isHost ? <button type="button" onClick={() => send({ type: "start_game" })} className="rounded-[7px] border border-[#00d77c] px-5 py-3 font-semibold text-[#00ed8a]">Start Game</button> : null}{currentPlayer?.isHost ? <button type="button" onClick={cancelClassroom} className="rounded-[7px] border border-red-400/60 px-5 py-3 font-semibold text-red-200">Cancel Classroom</button> : <button type="button" onClick={exitClassroom} className="rounded-[7px] border border-white/20 px-5 py-3 font-semibold text-white">Exit Classroom</button>}</div>
+             </div>
+             <div><div className="flex items-center gap-2 text-sm text-white"><span className="h-3 w-3 rounded-full bg-[#11c77a]" />Room Lobby</div><div className="mt-1 text-xs text-white/80">Room Code: <span className="font-bold tracking-[0.18em]">{room.roomCode}</span><button type="button" onClick={() => navigator.clipboard?.writeText(room.roomCode)} className="ml-2 text-[#6f9fff]" aria-label="Copy room code"><Copy className="inline h-3.5 w-3.5" /></button></div><div className="mt-3 overflow-hidden rounded-[8px] border border-[#2c6db2] bg-[#1c2451]"><div className="border-b border-[#2c6db2] px-7 py-3"><div className="font-semibold text-white">Connected Players</div><div className="text-xs text-white/75">{room.players.length}/{room.maxPlayers} players in the room</div></div>{room.players.map((player, index) => <div key={player.id} className="flex items-center gap-3 border-b border-[#2c6db2] px-7 py-2 last:border-0"><div className={`grid h-11 w-11 place-items-center rounded-full ${playerColors[index]}`}><Users className="h-7 w-7 text-white" /></div><div><div className="text-sm font-semibold text-white">{player.name}{player.isHost ? " (HOST)" : ""}</div><div className="text-xs text-[#00ed8a]">{player.ready ? "Ready" : "Waiting"}</div></div></div>)}</div></div>
+diff --git a/src/scenes/GameScene.ts b/src/scenes/GameScene.ts
+index b9642f5..44dc755 100644
+--- a/src/scenes/GameScene.ts
++++ b/src/scenes/GameScene.ts
+@@ -1,5 +1,5 @@
+ import Phaser from "phaser";
+-import { getWordCategory, WORD_BANK } from "../words";
++import { getWordCategory, getWordsForDifficulty, type WordCategory } from "../words";
+ import { PauseMenu } from "./game/PauseMenu";
+ import { getLaneX, pickLaneNotSame, type Lane } from "./game/lanes";
+ import { WaterEffects, WATER_TEXTURE_KEY } from "./game/WaterEffects";
+@@ -20,9 +20,25 @@ export type GameResult = {
+   wordSet: string;
+ };
+ 
++export type GameMode = "solo" | "multiplayer";
++
++export type GamePerformance = {
++  score: number;
++  wpm: number;
++  accuracy: number;
++  lives: number;
++  completedWords: number;
++  finished: boolean;
++};
++
+ type GameSceneInitData = {
++  mode?: GameMode;
++  roomCode?: string;
+   matchConfig: MatchConfig;
+   onGameOver: (result: GameResult) => void;
++  onPerformance?: (performance: GamePerformance) => void;
++  wordSequence?: string[];
++  startAt?: number;
+ };
+ 
+ export default class GameScene extends Phaser.Scene {
+@@ -52,6 +68,11 @@ export default class GameScene extends Phaser.Scene {
+   private waterEffects!: WaterEffects;
+   private matchConfig!: MatchConfig;
+   private onGameOver!: (result: GameResult) => void;
++  private onPerformance?: (performance: GamePerformance) => void;
++  private lastPerformanceReportSecond = -1;
++  private gameMode: GameMode = "solo";
++  private multiplayerWordSequence: string[] = [];
++  private multiplayerWordIndex = 0;
+ 
+   private activeWord = "";
+   private typedText = "";
+@@ -64,7 +85,7 @@ export default class GameScene extends Phaser.Scene {
+   private completedCharacters = 0;
+   private lives = 3;
+   private difficultyKey: keyof typeof GameScene.DIFFICULTY_CONFIG = "normal";
+-  private wordCategory = "general" as keyof typeof WORD_BANK;
++  private wordCategory: WordCategory = "general";
+   private endReason: "time" | "health" = "time";
+   private gameOver = false;
+   private wordX = 0;
+@@ -75,9 +96,13 @@ export default class GameScene extends Phaser.Scene {
+     super("GameScene");
+   }
+ 
+-  init({ matchConfig, onGameOver }: GameSceneInitData): void {
++  init({ mode = "solo", matchConfig, onGameOver, onPerformance, wordSequence }: GameSceneInitData): void {
++    this.gameMode = mode;
++    this.multiplayerWordSequence = wordSequence && wordSequence.length > 0 ? [...wordSequence] : [];
++    this.multiplayerWordIndex = 0;
+     this.matchConfig = matchConfig;
+     this.onGameOver = onGameOver;
++    this.onPerformance = onPerformance;
+     this.matchDurationSeconds = matchConfig.roundTime;
+     this.remainingSeconds = this.matchDurationSeconds;
+     this.difficultyKey = this.getDifficultyKey(matchConfig.difficulty);
+@@ -140,6 +165,7 @@ export default class GameScene extends Phaser.Scene {
+ 
+     this.spawnWord();
+     this.updateHud();
++    this.reportPerformance();
+ 
+     this.input.keyboard?.on("keydown", (event: KeyboardEvent) => {
+       if (event.key === "Escape") {
+@@ -167,6 +193,7 @@ export default class GameScene extends Phaser.Scene {
+     this.elapsedSeconds = Math.min(this.matchDurationSeconds, this.elapsedSeconds + dt);
+     this.remainingSeconds = Math.max(0, this.matchDurationSeconds - this.elapsedSeconds);
+     this.updateHud();
++    this.reportPerformance();
+ 
+     if (this.remainingSeconds <= 0) {
+       this.endMatch();
+@@ -183,14 +210,15 @@ export default class GameScene extends Phaser.Scene {
+   }
+ 
+   private spawnWord(): void {
+-    const difficulty = GameScene.DIFFICULTY_CONFIG[this.difficultyKey];
+-    const categoryWords = WORD_BANK[this.wordCategory];
+-    const candidates = categoryWords.filter(
+-      (word) => word.length >= difficulty.minimumLength && word.length <= difficulty.maximumLength,
+-    );
+-    const wordPool = candidates.length > 0 ? candidates : categoryWords;
+-    const index = Phaser.Math.Between(0, wordPool.length - 1);
+-    this.activeWord = wordPool[index];
++    if (this.gameMode === "multiplayer") {
++      const sequence = this.multiplayerWordSequence.length > 0 ? this.multiplayerWordSequence : ["type"];
++      this.activeWord = sequence[this.multiplayerWordIndex % sequence.length];
++      this.multiplayerWordIndex += 1;
++    } else {
++      const wordPool = getWordsForDifficulty(this.wordCategory, this.difficultyKey);
++      const index = Phaser.Math.Between(0, wordPool.length - 1);
++      this.activeWord = wordPool[index];
++    }
+ 
+     this.typedText = "";
+     this.typedDisplay.setText("");
+@@ -307,8 +335,26 @@ export default class GameScene extends Phaser.Scene {
+     );
+   }
+ 
++  private reportPerformance(force = false): void {
++    if (this.gameMode !== "multiplayer" || !this.onPerformance) return;
++    if (!force && Math.floor(this.elapsedSeconds) <= this.lastPerformanceReportSecond) return;
++    this.lastPerformanceReportSecond = Math.floor(this.elapsedSeconds);
++
++    const elapsedMinutes = this.elapsedSeconds / 60;
++    const totalKeystrokes = this.correctKeystrokes + this.incorrectKeystrokes;
++    this.onPerformance({
++      score: this.score,
++      wpm: elapsedMinutes > 0 ? this.completedCharacters / 5 / elapsedMinutes : 0,
++      accuracy: totalKeystrokes > 0 ? (this.correctKeystrokes / totalKeystrokes) * 100 : 0,
++      lives: this.lives,
++      completedWords: this.completedWords,
++      finished: this.gameOver,
++    });
++  }
++
+   private endMatch(): void {
+     this.gameOver = true;
++    this.reportPerformance(true);
+     const elapsedMinutes = this.elapsedSeconds / 60;
+     const wpm = elapsedMinutes > 0 ? this.completedCharacters / 5 / elapsedMinutes : 0;
+     const totalKeystrokes = this.correctKeystrokes + this.incorrectKeystrokes;
+@@ -329,9 +375,10 @@ export default class GameScene extends Phaser.Scene {
+       wordSet: this.matchConfig.wordSet,
+     });
+ 
++    const completionMessage = this.gameMode === "multiplayer" ? "\nWaiting for other players..." : "";
+     this.gameOverDisplay
+       .setText(
+-        `GAME OVER\n\nReason: ${this.endReason === "health" ? "Health depleted" : "Time expired"}\nScore: ${this.score}\nWPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%\nError Rate: ${errorRate.toFixed(1)}%\nCompleted words: ${this.completedWords}\nLives: ${this.lives}`,
++        `GAME OVER\n\nReason: ${this.endReason === "health" ? "Health depleted" : "Time expired"}\nScore: ${this.score}\nWPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%\nError Rate: ${errorRate.toFixed(1)}%\nCompleted words: ${this.completedWords}\nLives: ${this.lives}${completionMessage}`,
+       )
+       .setVisible(true);
+   }
+diff --git a/src/words.ts b/src/words.ts
+index d09855c..14fb032 100644
+--- a/src/words.ts
++++ b/src/words.ts
+@@ -1,40 +1,13 @@
+-export type WordCategory = "corporate" | "communication" | "records" | "accounting" | "technology" | "general";
++export {
++  DIFFICULTY_WORD_LENGTHS,
++  WORD_BANK,
++  WORD_CATEGORIES,
++  getDifficultyKey,
++  getWordCategory,
++  getWordsForDifficulty,
++} from "../server/src/wordBank";
++export type { WordCategory } from "../server/src/wordBank";
+ 
+-export const WORD_BANK: Record<WordCategory, string[]> = {
+-  corporate: [
+-    "team", "goal", "plan", "staff", "client", "office", "budget", "career", "report", "policy", "project", "meeting",
+-    "company", "manager", "workflow", "deadline", "strategy", "training", "resource", "planning", "proposal", "business",
+-  ],
+-  communication: [
+-    "talk", "call", "chat", "note", "tone", "reply", "email", "listen", "message", "contact", "dialogue", "speaker",
+-    "feedback", "meeting", "clarify", "channel", "response", "briefing", "question", "announce", "conversation", "statement",
+-  ],
+-  records: [
+-    "log", "file", "date", "name", "code", "form", "data", "entry", "index", "label", "record", "folder",
+-    "archive", "history", "source", "version", "storage", "catalog", "document", "register", "database", "reference",
+-  ],
+-  accounting: [
+-    "tax", "cash", "cost", "sale", "rate", "loan", "fund", "audit", "asset", "credit", "debit", "invoice",
+-    "income", "profit", "ledger", "balance", "payment", "expense", "account", "payable", "revenue", "forecast",
+-  ],
+-  technology: [
+-    "app", "code", "data", "file", "node", "web", "chip", "cloud", "debug", "server", "binary", "script",
+-    "system", "network", "kernel", "packet", "device", "browser", "runtime", "storage", "protocol", "database",
+-  ],
+-  general: [
+-    "cat", "dog", "tree", "type", "key", "true", "nice", "wait", "sound", "busy", "program", "framework",
+-    "bright", "garden", "summer", "window", "simple", "travel", "market", "picture", "weather", "practice",
+-  ],
+-};
++import { WORD_BANK } from "../server/src/wordBank";
+ 
+-export const WORDS: string[] = Object.values(WORD_BANK).flat();
+-
+-export function getWordCategory(value: string): WordCategory {
+-  const normalized = value.toLowerCase().replace(/[^a-z]/g, "");
+-  if (normalized === "corporate") return "corporate";
+-  if (normalized === "communication" || normalized === "communicate") return "communication";
+-  if (normalized === "records") return "records";
+-  if (normalized === "accounting") return "accounting";
+-  if (normalized === "technology") return "technology";
+-  return "general";
+-}
+\ No newline at end of file
++export const WORDS: string[] = Object.values(WORD_BANK).flat();
+\ No newline at end of file

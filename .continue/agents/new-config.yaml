@@ -1,0 +1,14 @@
+version: 0.0.1
+models:
+  - name: Fireworks - DeepSeek V3
+    provider: openai
+    apiBase: https://api.fireworks.ai/inference/v1
+    model: accounts/fireworks/models/deepseek-v3
+    apiKey: fw_JPsqPnm1yHsi7o7ouCLeGz
+
+tabAutocompleteModel:
+  name: Fireworks Autocomplete
+  provider: openai
+  apiBase: https://api.fireworks.ai/inference/v1
+  model: accounts/fireworks/models/qwen2p5-coder-32b-instruct
+  apiKey: fw_JPsqPnm1yHsi7o7ouCLeGz
