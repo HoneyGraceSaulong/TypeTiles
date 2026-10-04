@@ -16,6 +16,8 @@ export class WordTarget {
   private readonly wordBlock: Phaser.GameObjects.Rectangle;
   private readonly wordTextTyped: Phaser.GameObjects.Text;
   private readonly wordTextRemaining: Phaser.GameObjects.Text;
+  private wordImage?: Phaser.GameObjects.Image;
+  private isImagePrompt = false;
 
   private activeWord = "";
 
@@ -54,8 +56,12 @@ export class WordTarget {
 
   setWord(word: string, x: number, y: number): void {
     this.activeWord = word;
+    this.isImagePrompt = false;
+    this.wordImage?.setVisible(false);
 
     this.wordTextTyped.setText("");
+    this.wordTextTyped.setVisible(true);
+    this.wordTextRemaining.setVisible(true);
     this.wordTextRemaining.setText(word);
 
     const textWidth = this.wordTextRemaining.width;
@@ -69,7 +75,27 @@ export class WordTarget {
     this.setPosition(x, y);
   }
 
+  setGreggImage(textureKey: string, answer: string, x: number, y: number): void {
+    this.activeWord = answer;
+    this.isImagePrompt = true;
+    this.wordTextTyped.setText("").setVisible(false);
+    this.wordTextRemaining.setText("").setVisible(false);
+
+    if (!this.wordImage) {
+      this.wordImage = this.scene.add.image(0, 60, textureKey).setOrigin(0.5).setDepth(3);
+    } else {
+      this.wordImage.setTexture(textureKey).setVisible(true);
+    }
+
+    this.wordImage.setDisplaySize(120, 40);
+    this.wordBlock.setSize(180, this.tileHeight);
+    this.wordShadow.setSize(180, this.tileHeight);
+    this.setPosition(x, y);
+  }
+
   setTypedText(typedText: string): void {
+    if (this.isImagePrompt) return;
+
     const typedPart = this.activeWord.substring(0, typedText.length);
     const remainingPart = this.activeWord.substring(typedText.length);
 
@@ -80,6 +106,8 @@ export class WordTarget {
   }
 
   resetToFullWord(): void {
+    if (this.isImagePrompt) return;
+
     this.wordTextTyped.setText("");
     this.wordTextRemaining.setText(this.activeWord);
     this.layoutWordParts(this.wordBlock.x, this.wordBlock.y);
@@ -91,6 +119,7 @@ export class WordTarget {
 
     this.wordBlock.setPosition(snappedX, snappedY);
     this.wordShadow.setPosition(snappedX + this.shadowOffset, snappedY + this.shadowOffset);
+    this.wordImage?.setPosition(snappedX, snappedY);
     this.layoutWordParts(snappedX, snappedY);
   }
 

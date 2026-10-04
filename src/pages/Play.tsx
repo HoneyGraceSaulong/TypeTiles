@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { mockMatchConfig } from "../lib/mockData";
 
-const categories = ["Corporate", "Communication", "Records", "Accounting", "Technology", "General"] as const;
+const categories = ["Corporate", "Communication", "Records", "Accounting", "Technology", "General", "Stenography"] as const;
 const difficulties = ["Easy", "Normal", "Hard"] as const;
 const roundTimes = [30, 60, 90] as const;
 

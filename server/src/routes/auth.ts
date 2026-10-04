@@ -17,6 +17,15 @@ interface LoginBody {
   password: string;
 }
 
+interface ProfileUpdateBody {
+  displayName?: string;
+  avatar?: string;
+  background?: string;
+}
+
+const AVATAR_IDS = new Set(["hani", "helen", "jacq", "kyla", "liscano"]);
+const BACKGROUND_IDS = new Set(["blues", "volts"]);
+
 // Register
 router.post("/register", async (req: Request<{}, {}, RegisterBody>, res: Response) => {
   try {
@@ -90,7 +99,7 @@ router.post("/login", async (req: Request<{}, {}, LoginBody>, res: Response) => 
     const db = getDatabase();
 
     const user = await db.get(
-      `SELECT id, username, email, password_hash, display_name, tier, role, is_banned FROM users WHERE username = ?`,
+      `SELECT id, username, email, password_hash, display_name, avatar, background, tier, role, is_banned FROM users WHERE username = ?`,
       [username]
     );
 
@@ -121,6 +130,8 @@ router.post("/login", async (req: Request<{}, {}, LoginBody>, res: Response) => 
         username: user.username,
         email: user.email,
         displayName: user.display_name,
+        avatar: user.avatar,
+        background: user.background,
         tier: user.tier,
         role: normalizeRole(user.role),
       },
@@ -160,6 +171,69 @@ router.get("/me", authMiddleware, async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error("Get user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.put("/me/profile", authMiddleware, async (req: Request<{}, {}, ProfileUpdateBody>, res: Response) => {
+  try {
+    const displayName = req.body.displayName?.trim();
+    const avatar = req.body.avatar;
+    const background = req.body.background;
+    if (displayName !== undefined && !displayName) {
+      return res.status(400).json({ error: "Display name is required" });
+    }
+
+    if (avatar !== undefined && !AVATAR_IDS.has(avatar)) {
+      return res.status(400).json({ error: "Invalid avatar" });
+    }
+
+    if (background !== undefined && !BACKGROUND_IDS.has(background)) {
+      return res.status(400).json({ error: "Invalid background" });
+    }
+
+    if (displayName === undefined && avatar === undefined && background === undefined) {
+      return res.status(400).json({ error: "No profile changes supplied" });
+    }
+
+    const db = getDatabase();
+    const updates: string[] = [];
+    const values: (string | number)[] = [];
+    if (displayName !== undefined) {
+      updates.push("display_name = ?");
+      values.push(displayName);
+    }
+    if (avatar !== undefined) {
+      updates.push("avatar = ?");
+      values.push(avatar);
+    }
+    if (background !== undefined) {
+      updates.push("background = ?");
+      values.push(background);
+    }
+    updates.push("updated_at = CURRENT_TIMESTAMP");
+    values.push(req.user!.userId);
+    await db.run(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, values);
+
+    const user = await db.get(
+      "SELECT id, username, email, display_name, avatar, background, tier, role FROM users WHERE id = ?",
+      [req.user!.userId],
+    );
+
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        displayName: user.display_name,
+        avatar: user.avatar,
+        background: user.background,
+        tier: user.tier,
+        role: normalizeRole(user.role),
+      },
+    });
+  } catch (error) {
+    console.error("Update profile error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });

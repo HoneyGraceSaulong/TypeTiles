@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCheck, Star, Zap, type LucideIcon } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { mockMatchConfig } from "../lib/mockData";
 import { usePlayerAuth } from "../lib/PlayerAuthContext";
-import { getPlayerRank, type PlayerStats } from "../lib/playerApi";
+import { getPlayerHistory, getPlayerRank, type MatchHistoryRow, type PlayerStats } from "../lib/playerApi";
+import { getProfileAvatar, getProfileBackground } from "../lib/profileAssets";
 
 const assetRoot = "/figma/type-tiles-home";
 
@@ -14,19 +15,13 @@ const categories = [
   { label: "ACCOUNTING", image: `${assetRoot}/image7.png`, dimmed: true },
   { label: "TECHNOLOGY", image: `${assetRoot}/image8.png`, dimmed: true },
   { label: "GENERAL", solid: true },
+  { label: "STENOGRAPHY", solid: true },
 ] as const;
 
 const difficultyOptions = ["Easy", "Normal", "Hard"] as const;
 
 type CategoryLabel = (typeof categories)[number]["label"];
 type DifficultyLabel = (typeof difficultyOptions)[number];
-
-type HomeProfile = {
-  name: string;
-  rank: string;
-  status: string;
-  level: number;
-};
 
 function HomeStatIcon({ icon: Icon, alt }: { icon: LucideIcon; alt: string }) {
   return <Icon aria-label={alt} className="h-[26px] w-[26px] shrink-0 text-sky-500" />;
@@ -36,45 +31,30 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user, stats: restoredStats } = usePlayerAuth();
   const [dashboardStats, setDashboardStats] = useState<PlayerStats | null>(restoredStats);
+  const [latestMatch, setLatestMatch] = useState<MatchHistoryRow | null>(null);
   const [rank, setRank] = useState<number | null>(null);
   const [statsError, setStatsError] = useState("");
 
   useEffect(() => {
-    getPlayerRank()
-      .then((response) => {
-        setDashboardStats(response.stats);
-        setRank(response.rank);
+    Promise.all([getPlayerRank(), getPlayerHistory()])
+      .then(([rankResponse, historyResponse]) => {
+        setDashboardStats(rankResponse.stats);
+        setRank(rankResponse.rank);
+        setLatestMatch(historyResponse.history[0] ?? null);
       })
       .catch((error) => setStatsError(error instanceof Error ? error.message : "Unable to load stats"));
   }, []);
 
   const statItems = [
-    { icon: Zap, label: "Best WPM", value: dashboardStats ? String(dashboardStats.best_wpm) : "...", valueClassName: "text-white" },
+    { icon: Zap, label: "Best WPM", value: dashboardStats ? dashboardStats.best_wpm.toFixed(1) : "...", valueClassName: "text-white" },
     { icon: CheckCheck, label: "Accuracy", value: dashboardStats ? `${dashboardStats.avg_accuracy.toFixed(1)}%` : "...", valueClassName: "text-emerald-400" },
     { icon: Star, label: "Max Combo", value: dashboardStats ? String(dashboardStats.top_combo) : "...", valueClassName: "text-amber-300" },
   ] as const;
-  const [profile, setProfile] = useState<HomeProfile>({
-    name: user?.displayName || user?.username || "Player",
-    rank: "Rank # — Global",
-    status: "Online",
-    level: 42,
-  });
-  const [draftProfile, setDraftProfile] = useState<HomeProfile>(profile);
-  const [profileOpen, setProfileOpen] = useState(false);
-
   const [selectedCategory, setSelectedCategory] = useState<CategoryLabel | null>(null);
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLabel>("Normal");
 
-  const progressWidth = useMemo(() => Math.min(100, Math.max(0, profile.level * 0.95)), [profile.level]);
-
   const openProfileModal = () => {
-    setDraftProfile(profile);
-    setProfileOpen(true);
-  };
-
-  const saveProfile = () => {
-    setProfile(draftProfile);
-    setProfileOpen(false);
+    navigate("/app/customize");
   };
 
   const handleStartFromCategory = () => {
@@ -97,30 +77,24 @@ export default function Dashboard() {
     <section className="h-full overflow-y-auto pb-4">
       <h1 className="px-1 text-[1.95rem] font-semibold tracking-[-0.03em] text-white sm:text-[2.15rem]">Welcome to Type Tiles!</h1>
 
-      <article className="mt-4 rounded-[10px] border border-[#3d3d3d]/70 bg-[#c3d9ed] px-4 py-3 text-slate-900 shadow-[0_20px_50px_rgba(5,8,24,0.35)]">
+      <article
+        className="mt-4 rounded-[10px] border border-[#3d3d3d]/70 bg-[#c3d9ed] bg-cover bg-center px-4 py-3 text-slate-900 shadow-[0_20px_50px_rgba(5,8,24,0.35)]"
+        style={{ backgroundImage: `linear-gradient(rgba(195,217,237,.84), rgba(195,217,237,.84)), url(${getProfileBackground(user?.background).source})` }}
+      >
             <div className="flex items-center gap-3 sm:gap-4">
               <div className="h-[84px] w-[88px] shrink-0 overflow-hidden rounded-[9px] bg-[#4186c0]">
-                <img alt="Player avatar" className="h-full w-full object-cover object-[center_top]" src={`${assetRoot}/avatar.png`} />
+                <img alt={`${getProfileAvatar(user?.avatar).label} avatar`} className="h-full w-full object-cover object-[center_top]" src={getProfileAvatar(user?.avatar).source} />
               </div>
 
               <div className="min-w-0 flex-1">
                 <div className="text-[0.7rem] uppercase tracking-[0.16em] text-[#3d3d3d]">Player</div>
-                <div className="mt-1 truncate text-[1.85rem] font-semibold leading-none tracking-[-0.03em] text-black">{profile.name}</div>
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-[0.68rem] uppercase tracking-[0.12em] text-[#3d3d3d]">
-                  <span className="font-semibold text-[#3d3d3d]">{rank ? `Rank # ${rank} Global` : profile.rank}</span>
-                  <span className="opacity-70">|</span>
-                  <span>Status:</span>
-                  <span className="text-emerald-500">{profile.status}</span>
-                  <span className="opacity-70">|</span>
-                  <span>Latency:</span>
+                <div className="mt-1 truncate text-[1.85rem] font-semibold leading-none tracking-[-0.03em] text-black">{user?.displayName || user?.username || "Player"}</div>
+                <div className="mt-3 text-[0.68rem] uppercase tracking-[0.12em] text-[#3d3d3d]">
+                  {rank !== null ? `Rank # ${rank} Global` : "Rank unavailable"}
                 </div>
               </div>
 
-              <div className="hidden min-w-[220px] shrink-0 text-right sm:block">
-                <div className="text-[0.63rem] uppercase tracking-[0.13em] text-[#3d3d3d]">Progress : LVL {profile.level}</div>
-                <div className="mt-1 h-[7px] overflow-hidden rounded-full bg-white">
-                  <div className="h-full rounded-full bg-sky-500" style={{ width: `${progressWidth}%` }} />
-                </div>
+              <div className="hidden min-w-[180px] shrink-0 text-right sm:block">
                 <button
                   type="button"
                   onClick={openProfileModal}
@@ -154,28 +128,17 @@ export default function Dashboard() {
             {statsError ? <div className="mt-3 text-xs text-amber-300">{statsError}</div> : null}
           </article>
 
-          <article className="relative overflow-hidden rounded-[10px] border border-[#2967a1] bg-[#1d234a] p-4 shadow-[0_16px_30px_rgba(4,8,25,0.35)]">
-            <div className="text-[1.1rem] font-medium text-white">Daily Directive</div>
-            <div className="mt-3 text-[0.65rem] uppercase tracking-[0.18em] text-white/90">Progress :</div>
-            <div className="mt-2 h-[8px] max-w-[210px] overflow-hidden rounded-full bg-white">
-              <div className="h-full w-[60%] rounded-full bg-sky-500" />
-            </div>
-            <p className="mt-3 max-w-[190px] text-[0.75rem] leading-5 text-white/90">Keep it up! You’re getting better every day.</p>
-            <img alt="" className="pointer-events-none absolute right-3 top-1/2 h-[120px] w-[120px] -translate-y-1/2 opacity-15" src={`${assetRoot}/preview2.png`} />
-          </article>
-
           <article className="relative overflow-hidden rounded-[10px] border border-[#2967a1] bg-[#1a2349] p-4 shadow-[0_16px_30px_rgba(4,8,25,0.35)]">
             <div className="text-[1.1rem] font-medium text-white">Last Transmission</div>
-            <div className="mt-2 flex items-end gap-3">
-              <div className="text-[3rem] font-semibold leading-none tracking-[-0.06em] text-white">154</div>
-              <div className="pb-1 text-sm uppercase tracking-[0.16em] text-white/90">WPM</div>
-              <div className="ml-auto rounded-[4px] border border-[#01ca62]/80 bg-[rgba(0,171,82,0.6)] px-5 py-2 text-[0.65rem] uppercase tracking-[0.18em] text-white">
-                Victory
+            {latestMatch ? <>
+              <div className="mt-2 flex items-end gap-3">
+                <div className="text-[3rem] font-semibold leading-none tracking-[-0.06em] text-white">{latestMatch.wpm.toFixed(1)}</div>
+                <div className="pb-1 text-sm uppercase tracking-[0.16em] text-white/90">WPM</div>
               </div>
-            </div>
-            <div className="mt-3 text-[0.75rem] uppercase tracking-[0.18em] text-white/90">
-              Cloud Burst <span className="mx-2 text-white/55">02m</span> Ago
-            </div>
+              <div className="mt-3 text-[0.75rem] uppercase tracking-[0.18em] text-white/90">
+                {latestMatch.mode} <span className="mx-2 text-white/55">{new Date(latestMatch.created_at).toLocaleDateString()}</span>
+              </div>
+            </> : <div className="mt-3 text-sm text-white/70">No completed matches yet.</div>}
             <img alt="" className="pointer-events-none absolute -bottom-2 right-1 h-[74px] w-[98px] opacity-70" src={`${assetRoot}/cloud9.png`} />
             <img alt="" className="pointer-events-none absolute -bottom-2 right-6 h-[80px] w-[74px] opacity-90" src={`${assetRoot}/cloud10.png`} />
           </article>
@@ -223,72 +186,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-
-      {profileOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/65 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg rounded-[0.9rem] border border-[#5da3c5] bg-[#13173b] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
-            <div className="mb-4 text-center font-['Roboto'] text-xl font-bold text-white">Edit Profile</div>
-            <div className="space-y-3">
-              <label className="block text-sm text-white/90">
-                Name
-                <input
-                  value={draftProfile.name}
-                  onChange={(event) => setDraftProfile((value) => ({ ...value, name: event.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-[#5da3c5] bg-white px-3 py-2 text-[#0b2e44] outline-none"
-                />
-              </label>
-              <label className="block text-sm text-white/90">
-                Rank
-                <input
-                  value={draftProfile.rank}
-                  onChange={(event) => setDraftProfile((value) => ({ ...value, rank: event.target.value }))}
-                  className="mt-1 w-full rounded-lg border border-[#5da3c5] bg-white px-3 py-2 text-[#0b2e44] outline-none"
-                />
-              </label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-sm text-white/90">
-                  Status
-                  <input
-                    value={draftProfile.status}
-                    onChange={(event) => setDraftProfile((value) => ({ ...value, status: event.target.value }))}
-                    className="mt-1 w-full rounded-lg border border-[#5da3c5] bg-white px-3 py-2 text-[#0b2e44] outline-none"
-                  />
-                </label>
-                <label className="block text-sm text-white/90">
-                  Level
-                  <input
-                    type="number"
-                    min={1}
-                    max={99}
-                    value={draftProfile.level}
-                    onChange={(event) => {
-                      const level = Number(event.target.value);
-                      setDraftProfile((value) => ({ ...value, level: Number.isNaN(level) ? value.level : level }));
-                    }}
-                    className="mt-1 w-full rounded-lg border border-[#5da3c5] bg-white px-3 py-2 text-[#0b2e44] outline-none"
-                  />
-                </label>
-              </div>
-            </div>
-            <div className="mt-5 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setProfileOpen(false)}
-                className="rounded-lg border border-white/25 bg-white/10 px-4 py-2 text-white"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveProfile}
-                className="rounded-lg border border-[#5da3c5] bg-white px-4 py-2 font-semibold text-[#0898dd]"
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {selectedCategory ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-[2px]">

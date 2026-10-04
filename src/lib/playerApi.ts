@@ -9,6 +9,7 @@ export type PlayerUser = {
   email: string;
   displayName: string;
   avatar?: string;
+  background?: string;
   tier: string;
   role: "student" | "teacher" | "admin";
 };
@@ -118,6 +119,13 @@ export function loginPlayer(username: string, password: string): Promise<AuthRes
 
 export function getCurrentPlayer(token: string): Promise<MeResponse> {
   return request<MeResponse>("/auth/me", {}, token);
+}
+
+export function updatePlayerProfile(input: { displayName?: string; avatar?: string; background?: string }): Promise<{ user: PlayerUser }> {
+  return authenticatedRequest<{ user: PlayerUser }>("/auth/me/profile", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
 }
 
 export function createPlayerMatch(input: CreateMatchInput): Promise<CreateMatchResponse> {

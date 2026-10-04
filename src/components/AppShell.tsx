@@ -1,6 +1,6 @@
 import { Dices, LogOut, Menu, Trophy, UserRound, Users, X } from "lucide-react";
 import { useState } from "react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import homeIcon from "../assets/homeicon/home.png";
 import { HudBackground } from "./HudBackground";
 import { usePlayerAuth } from "../lib/PlayerAuthContext";
@@ -9,7 +9,7 @@ const navItems = [
   { label: "Home", to: "/app", icon: homeIcon, iconClassName: "h-5 w-5", end: true },
   { label: "Multiplayer", to: "/app/lobby", icon: Users, iconClassName: "h-5 w-5" },
   { label: "Results", to: "/app/results", icon: Trophy, iconClassName: "h-5 w-5" },
-  { label: "Profile", to: "/app/settings", icon: UserRound, iconClassName: "h-5 w-5" },
+  { label: "Profile", to: "/app/customize", icon: UserRound, iconClassName: "h-5 w-5" },
 ] as const;
 
 function NavIcon({ icon, iconClassName }: { icon: (typeof navItems)[number]["icon"]; iconClassName: string }) {
@@ -23,6 +23,7 @@ function NavIcon({ icon, iconClassName }: { icon: (typeof navItems)[number]["ico
 
 export function AppShell() {
   const [open, setOpen] = useState(false);
+  const location = useLocation();
   const navigate = useNavigate();
   const { logout, user } = usePlayerAuth();
 
@@ -69,7 +70,7 @@ export function AppShell() {
                 className={({ isActive }) =>
                   [
                     "flex items-center gap-3 rounded-[0.55rem] px-3 py-3 text-sm font-semibold transition",
-                    isActive
+                    isActive || (item.label === "Profile" && location.pathname === "/app/settings")
                       ? "bg-[#233f9d] text-white shadow-[0_12px_30px_rgba(13,43,124,0.45)]"
                       : "text-white/92 hover:bg-white/8 hover:text-white",
                   ].join(" ")

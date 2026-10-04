@@ -51,6 +51,11 @@ async function createTables(db: Database) {
     )
   `);
 
+  const userColumns = await db.all<{ name: string }[]>("PRAGMA table_info(users)");
+  if (!userColumns.some((column) => column.name === "background")) {
+    await db.exec("ALTER TABLE users ADD COLUMN background TEXT");
+  }
+
   // User stats table
   await db.exec(`
     CREATE TABLE IF NOT EXISTS user_stats (

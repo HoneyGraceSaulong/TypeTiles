@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getWordCategory, getWordsForDifficulty, type WordCategory } from "../words";
+import { getGreggPrompt, getWordCategory, getWordsForDifficulty, GREGG_PROMPTS, type WordCategory } from "../words";
 import { PauseMenu } from "./game/PauseMenu";
 import { getLaneX, pickLaneNotSame, type Lane } from "./game/lanes";
 import { WaterEffects, WATER_TEXTURE_KEY } from "./game/WaterEffects";
@@ -116,6 +116,12 @@ export default class GameScene extends Phaser.Scene {
       frameWidth: this.WATER_FRAME_SIZE,
       frameHeight: this.WATER_FRAME_SIZE,
     });
+
+    if (this.wordCategory === "stenography") {
+      for (const prompt of GREGG_PROMPTS) {
+        this.load.image(prompt.id, prompt.image);
+      }
+    }
   }
 
   create(): void {
@@ -162,6 +168,14 @@ export default class GameScene extends Phaser.Scene {
       tileHeight: this.TILE_HEIGHT,
       tilePaddingX: this.TILE_PADDING_X,
     });
+
+    if (this.wordCategory === "stenography" && GREGG_PROMPTS.length === 0) {
+      this.gameOverDisplay
+        .setText("Gregg shorthand assets are not available yet.")
+        .setVisible(true);
+      this.gameOver = true;
+      return;
+    }
 
     this.spawnWord();
     this.updateHud();
@@ -210,6 +224,26 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private spawnWord(): void {
+    if (this.wordCategory === "stenography") {
+      const promptAnswers = getWordsForDifficulty(this.wordCategory, this.difficultyKey);
+      const sequence = this.gameMode === "multiplayer" && this.multiplayerWordSequence.length > 0
+        ? this.multiplayerWordSequence
+        : promptAnswers;
+      this.activeWord = sequence[this.multiplayerWordIndex % sequence.length];
+      this.multiplayerWordIndex += 1;
+      const prompt = getGreggPrompt(this.activeWord);
+      if (!prompt) return;
+
+      this.typedText = "";
+      this.typedDisplay.setText("");
+      this.wordY = 60;
+      const lane = pickLaneNotSame(this.lastLane);
+      this.lastLane = lane;
+      this.wordX = getLaneX(this.scale.width, lane);
+      this.wordTarget.setGreggImage(prompt.id, this.activeWord, this.wordX, this.wordY);
+      return;
+    }
+
     if (this.gameMode === "multiplayer") {
       const sequence = this.multiplayerWordSequence.length > 0 ? this.multiplayerWordSequence : ["type"];
       this.activeWord = sequence[this.multiplayerWordIndex % sequence.length];

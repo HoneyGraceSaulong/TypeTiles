@@ -97,11 +97,28 @@ router.post("/matches/:matchId/submit", authMiddleware, async (req: Request<{ ma
     const { matchId } = req.params;
     const { score, wpm, accuracy } = req.body;
 
-    if (score === undefined || wpm === undefined || accuracy === undefined) {
-      return res.status(400).json({ error: "Missing score, wpm, or accuracy" });
+    if (
+      !Number.isInteger(Number(matchId)) ||
+      !Number.isFinite(score) ||
+      !Number.isFinite(wpm) ||
+      !Number.isFinite(accuracy) ||
+      wpm < 0 ||
+      accuracy < 0 ||
+      accuracy > 100
+    ) {
+      return res.status(400).json({ error: "Invalid score, wpm, or accuracy" });
     }
 
     const db = getDatabase();
+    const match = await db.get("SELECT id FROM matches WHERE id = ?", [matchId]);
+    const participant = await db.get(
+      "SELECT id FROM match_participants WHERE match_id = ? AND user_id = ?",
+      [matchId, req.user!.userId],
+    );
+
+    if (!match || !participant) {
+      return res.status(404).json({ error: "Match participation not found" });
+    }
 
     // Update participant score
     await db.run(
@@ -115,17 +132,19 @@ router.post("/matches/:matchId/submit", authMiddleware, async (req: Request<{ ma
     const newTotalScore = (currentStats.total_score || 0) + score;
     const newBestWpm = Math.max(currentStats.best_wpm || 0, wpm);
     const newTopCombo = Math.max(currentStats.top_combo || 0, 0); // You'd calculate this from game logic
+    const completedGames = (currentStats.games_played || 0) + 1;
+    const newAverageAccuracy = ((currentStats.avg_accuracy || 0) * (currentStats.games_played || 0) + accuracy) / completedGames;
 
     await db.run(
       `UPDATE user_stats SET 
-        games_played = games_played + 1,
+        games_played = ?,
         total_score = ?, 
         best_wpm = ?, 
         top_combo = ?,
         avg_accuracy = ?,
         updated_at = CURRENT_TIMESTAMP
       WHERE user_id = ?`,
-      [newTotalScore, newBestWpm, newTopCombo, accuracy, req.user!.userId]
+      [completedGames, newTotalScore, newBestWpm, newTopCombo, newAverageAccuracy, req.user!.userId]
     );
 
     res.json({
@@ -133,7 +152,7 @@ router.post("/matches/:matchId/submit", authMiddleware, async (req: Request<{ ma
       updatedStats: {
         totalScore: newTotalScore,
         bestWpm: newBestWpm,
-        avgAccuracy: accuracy,
+        avgAccuracy: newAverageAccuracy,
       },
     });
   } catch (error) {
@@ -183,6 +202,8 @@ router.get("/users/history", authMiddleware, async (req: Request, res: Response)
        FROM matches m
        JOIN match_participants mp ON m.id = mp.match_id
        WHERE mp.user_id = ?
+         AND m.mode <> 'LAN Match'
+         AND (mp.score <> 0 OR mp.wpm <> 0 OR mp.accuracy <> 0)
        ORDER BY m.created_at DESC
        LIMIT 20`,
       [req.user!.userId]

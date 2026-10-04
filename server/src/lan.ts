@@ -436,6 +436,7 @@ function createWordSequence(config: ClassroomMatchConfig): string[] {
   const difficulty = getDifficultyKey(config.difficulty);
   if (!difficulty) return [];
   const pool = getWordsForDifficulty(config.wordSet, difficulty);
+  if (pool.length === 0) return [];
   const length = Math.max(12, Math.ceil(config.roundTime / 3));
   return Array.from({ length }, (_, index) => pool[index % pool.length]);
 }

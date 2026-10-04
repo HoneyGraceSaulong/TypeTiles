@@ -5,6 +5,7 @@ import {
   loginPlayer,
   PLAYER_TOKEN_KEY,
   registerPlayer,
+  updatePlayerProfile,
   type PlayerStats,
   type PlayerUser,
 } from "./playerApi";
@@ -22,6 +23,7 @@ type PlayerAuthContextValue = {
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
+  updateProfile: (input: { displayName?: string; avatar?: string; background?: string }) => Promise<void>;
   logout: () => void;
 };
 
@@ -68,6 +70,10 @@ export function PlayerAuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(PLAYER_TOKEN_KEY, response.token);
         setUser(response.user);
         setStats(null);
+      },
+      updateProfile: async (input) => {
+        const response = await updatePlayerProfile(input);
+        setUser(response.user);
       },
       logout: () => {
         localStorage.removeItem(PLAYER_TOKEN_KEY);
