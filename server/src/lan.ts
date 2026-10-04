@@ -65,6 +65,7 @@ type Room = {
   matchConfig: ClassroomMatchConfig;
   wordSequence?: string[];
   startAt?: number;
+  classroomResultsSent: boolean;
   players: Map<string, Player>;
 };
 
@@ -98,7 +99,15 @@ function broadcast(room: Room) {
 }
 
 function broadcastStandings(room: Room) {
-  const players = [...room.players.values()]
+  const players = getStudentResults(room);
+
+  for (const player of room.players.values()) {
+    send(player.socket, { type: "standings_update", players });
+  }
+}
+
+function getStudentResults(room: Room) {
+  return [...room.players.values()]
     .filter((player) => player.role === "student" && player.userId !== undefined)
     .map((player) => ({
       userId: player.userId,
@@ -112,10 +121,6 @@ function broadcastStandings(room: Room) {
       finished: player.performance?.finished || false,
     }))
     .sort((left, right) => right.score - left.score || right.wpm - left.wpm || right.accuracy - left.accuracy);
-
-  for (const player of room.players.values()) {
-    send(player.socket, { type: "standings_update", players });
-  }
 }
 
 function makeRoomCode() {
@@ -230,6 +235,7 @@ export function attachLanServer(server: import("http").Server) {
             started: false,
             ownerUserId: identity.userId,
             matchConfig,
+            classroomResultsSent: false,
             players: new Map([[player.id, player]]),
           };
           rooms.set(room.code, room);
@@ -385,6 +391,21 @@ export function attachLanServer(server: import("http").Server) {
 
           player.performance = { score, wpm, accuracy, lives, completedWords, finished };
           broadcastStandings(room);
+
+          const students = [...room.players.values()].filter(
+            (participant) => participant.role === "student" && participant.userId !== undefined,
+          );
+          if (
+            !room.classroomResultsSent &&
+            students.length > 0 &&
+            students.every((student) => student.performance?.finished === true)
+          ) {
+            room.classroomResultsSent = true;
+            const players = getStudentResults(room);
+            for (const participant of room.players.values()) {
+              send(participant.socket, { type: "classroom_results", roomCode: room.code, players });
+            }
+          }
         }
       } catch (error) {
         console.error("LAN message error:", error);

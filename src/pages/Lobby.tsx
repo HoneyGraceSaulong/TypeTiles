@@ -77,6 +77,7 @@ export default function Lobby() {
   const [room, setRoom] = useState<RoomState | null>(null);
   const [wordSequence, setWordSequence] = useState<string[]>([]);
   const [standings, setStandings] = useState<Standing[]>([]);
+  const [classroomResults, setClassroomResults] = useState<Standing[] | null>(null);
   const [matchInProgress, setMatchInProgress] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [error, setError] = useState("");
@@ -147,6 +148,10 @@ export default function Lobby() {
 
       if (message.type === "standings_update") {
         setStandings(message.players || []);
+      }
+
+      if (message.type === "classroom_results") {
+        setClassroomResults(message.players || []);
       }
 
       if (
@@ -450,6 +455,7 @@ export default function Lobby() {
     setRoom(null);
     setRoomCode("");
     setStandings([]);
+    setClassroomResults(null);
     setMatchInProgress(false);
 
     localStorage.removeItem(LAN_ROOM_CODE_KEY);
@@ -933,8 +939,36 @@ export default function Lobby() {
 </div>
 
               {/* TEACHER LIVE STANDINGS */}
-              {teacherMatchInProgress ||
-              matchInProgress ? (
+              {classroomResults ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-black/70 p-3 text-xs text-white">
+                  <div className="mb-2 text-xs uppercase tracking-[0.25em] text-emerald-300">
+                    Classroom Results
+                  </div>
+
+                  <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-3 border-b border-white/10 pb-2 text-slate-400">
+                    <span>Rank</span>
+                    <span>Player</span>
+                    <span>Score</span>
+                    <span>WPM</span>
+                    <span>Accuracy</span>
+                    <span>Completed Words</span>
+                  </div>
+
+                  <div className="mt-2 space-y-2">
+                    {classroomResults.map((result, index) => (
+                      <div key={result.userId} className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-3">
+                        <span>#{index + 1}</span>
+                        <span className="truncate">{result.displayName || result.username}</span>
+                        <span>{result.score}</span>
+                        <span>{result.wpm.toFixed(0)}</span>
+                        <span>{result.accuracy.toFixed(0)}%</span>
+                        <span>{result.completedWords}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : teacherMatchInProgress ||
+                matchInProgress ? (
                 <div className="mt-4 rounded-2xl border border-white/10 bg-black/70 p-3 text-xs text-white">
                   <div className="mb-2 text-xs uppercase tracking-[0.25em] text-emerald-300">
                     Live Standings
