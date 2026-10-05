@@ -7,6 +7,7 @@ import authRoutes from "./routes/auth.js";
 import matchesRoutes from "./routes/matches.js";
 import leaderboardRoutes from "./routes/leaderboard.js";
 import adminRoutes from "./routes/admin.js";
+import feedbackRoutes from "./routes/feedback.js";
 import { attachLanServer } from "./lan.js";
 
 const app = express();
@@ -59,6 +60,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api", matchesRoutes);
 app.use("/api", leaderboardRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/feedback", feedbackRoutes);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

@@ -128,6 +128,13 @@ export function updatePlayerProfile(input: { displayName?: string; avatar?: stri
   });
 }
 
+export function submitFeedback(message: string): Promise<{ message: string }> {
+  return authenticatedRequest<{ message: string }>("/feedback", {
+    method: "POST",
+    body: JSON.stringify({ message }),
+  });
+}
+
 export function createPlayerMatch(input: CreateMatchInput): Promise<CreateMatchResponse> {
   return authenticatedRequest<CreateMatchResponse>("/matches", {
     method: "POST",

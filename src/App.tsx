@@ -16,7 +16,7 @@ import Lobby from "./pages/Lobby";
 import Play from "./pages/Play";
 import PreMatch from "./pages/PreMatch";
 import Results from "./pages/Results";
-import Settings from "./pages/Settings";
+import Settings, { AboutTypeTiles, AccountSettings, FeedbackPage, HelpSupport, NotificationSettings } from "./pages/Settings";
 import TeacherDashboard from "./pages/TeacherDashboard";
 
 function GameRoute() {
@@ -85,6 +85,11 @@ export default function App() {
         <Route path="achievements" element={<Achievements />} />
         <Route path="friends" element={<Friends />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="settings/account" element={<AccountSettings />} />
+        <Route path="settings/notifications" element={<NotificationSettings />} />
+        <Route path="settings/help" element={<HelpSupport />} />
+        <Route path="settings/about" element={<AboutTypeTiles />} />
+        <Route path="settings/feedback" element={<FeedbackPage />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

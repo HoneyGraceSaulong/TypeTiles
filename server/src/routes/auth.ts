@@ -147,7 +147,7 @@ router.get("/me", authMiddleware, async (req: Request, res: Response) => {
   try {
     const db = getDatabase();
     const user = await db.get(
-      `SELECT id, username, email, display_name, avatar, tier, role FROM users WHERE id = ?`,
+      `SELECT id, username, email, display_name, avatar, background, tier, role FROM users WHERE id = ?`,
       [req.user!.userId]
     );
 
@@ -164,6 +164,7 @@ router.get("/me", authMiddleware, async (req: Request, res: Response) => {
         email: user.email,
         displayName: user.display_name,
         avatar: user.avatar,
+        background: user.background,
         tier: user.tier,
         role: normalizeRole(user.role),
       },
