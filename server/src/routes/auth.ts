@@ -24,7 +24,7 @@ interface ProfileUpdateBody {
 }
 
 const AVATAR_IDS = new Set(["hani", "helen", "jacq", "kyla", "liscano"]);
-const BACKGROUND_IDS = new Set(["blues", "volts"]);
+const BACKGROUND_IDS = new Set(["blues", "volts", "office", "city"]);
 
 // Register
 router.post("/register", async (req: Request<{}, {}, RegisterBody>, res: Response) => {

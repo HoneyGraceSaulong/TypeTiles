@@ -11,6 +11,7 @@ import {
   submitPlayerMatchResult,
 } from "../lib/playerApi";
 import { usePlayerAuth } from "../lib/PlayerAuthContext";
+import { getProfileBackground } from "../lib/profileAssets";
 
 type ClassroomResult = {
   userId: number;
@@ -260,33 +261,19 @@ export default function Game({
     });
   };
 
+  const restartMatch = () => {
+    navigate("/app/pre-match", {
+      replace: true,
+      state: { matchConfig },
+    });
+  };
+
+  const exitMatch = () => {
+    navigate("/app", { replace: true });
+  };
+
   return (
-    <section className="relative flex h-full min-h-0 flex-col gap-4">
-      {/* MATCH INFORMATION */}
-      <div className="hud-panel rounded-[2rem] px-5 py-4">
-        <div className="text-xs uppercase tracking-[0.35em] text-emerald-300">
-          Match
-        </div>
-
-        <div className="mt-2 flex flex-wrap gap-2 text-sm text-slate-300">
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-            {matchConfig.mode}
-          </span>
-
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-            {matchConfig.difficulty}
-          </span>
-
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-            {matchConfig.roundTime}s
-          </span>
-
-          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-            {matchConfig.wordSet}
-          </span>
-        </div>
-      </div>
-
+    <section className="relative flex h-full min-h-0 flex-col">
       {/* GAME AREA */}
       {!classroomResults ? (
         <div className="flex min-h-0 min-w-0 flex-1 gap-4">
@@ -294,6 +281,9 @@ export default function Game({
             mode={mode}
             roomCode={roomCode}
             matchConfig={matchConfig}
+            backgroundImage={getProfileBackground(user?.background).source}
+            onRestart={mode === "solo" ? restartMatch : undefined}
+            onExit={mode === "solo" ? exitMatch : undefined}
             wordSequence={wordSequence}
             startAt={startAt}
             onGameOver={handleGameOver}
@@ -302,9 +292,8 @@ export default function Game({
         </div>
       ) : (
         /*
-         * Once classroom_results arrives,
-         * Phaser is removed from view.
-         *
+        * Once classroom_results arrives,
+        * Phaser is removed from view.
          * This prevents:
          * Game Over + Match Complete +
          * Classroom Results

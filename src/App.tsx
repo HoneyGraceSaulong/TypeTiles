@@ -17,7 +17,6 @@ import Play from "./pages/Play";
 import PreMatch from "./pages/PreMatch";
 import Results from "./pages/Results";
 import Settings, { AboutTypeTiles, AccountSettings, FeedbackPage, HelpSupport, NotificationSettings } from "./pages/Settings";
-import TeacherDashboard from "./pages/TeacherDashboard";
 
 function GameRoute() {
   const location = useLocation();
@@ -45,8 +44,7 @@ function GameRoute() {
 }
 
 function DashboardRoute() {
-  const { user } = usePlayerAuth();
-  return user?.role === "teacher" ? <TeacherDashboard /> : <Dashboard />;
+  return <Dashboard />;
 }
 
 function ProtectedApp() {

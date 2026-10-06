@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { getGreggPrompt, getWordCategory, getWordsForDifficulty, GREGG_PROMPTS, type WordCategory } from "../words";
+import { getGreggPrompt, getWordCategory, getWordsForDifficulty, GREGG_PROMPTS, WORD_BANK, type WordCategory } from "../words";
 import { PauseMenu } from "./game/PauseMenu";
 import { getLaneX, pickLaneNotSame, type Lane } from "./game/lanes";
 import { WaterEffects, WATER_TEXTURE_KEY } from "./game/WaterEffects";
@@ -37,6 +37,8 @@ type GameSceneInitData = {
   matchConfig: MatchConfig;
   onGameOver: (result: GameResult) => void;
   onPerformance?: (performance: GamePerformance) => void;
+  onRestart?: () => void;
+  onExit?: () => void;
   wordSequence?: string[];
   startAt?: number;
 };
@@ -61,7 +63,11 @@ export default class GameScene extends Phaser.Scene {
   // ==============
 
   private typedDisplay!: Phaser.GameObjects.Text;
-  private hudText!: Phaser.GameObjects.Text;
+  private topHudPanel!: Phaser.GameObjects.Rectangle;
+  private topHudMetrics: Array<{ label: Phaser.GameObjects.Text; value: Phaser.GameObjects.Text }> = [];
+  private hudPanel!: Phaser.GameObjects.Rectangle;
+  private hudMetrics: Array<{ label: Phaser.GameObjects.Text; value: Phaser.GameObjects.Text; color: string }> = [];
+  private hudDividers: Phaser.GameObjects.Rectangle[] = [];
   private gameOverDisplay!: Phaser.GameObjects.Text;
   private pauseMenu!: PauseMenu;
   private wordTarget!: WordTarget;
@@ -69,10 +75,14 @@ export default class GameScene extends Phaser.Scene {
   private matchConfig!: MatchConfig;
   private onGameOver!: (result: GameResult) => void;
   private onPerformance?: (performance: GamePerformance) => void;
+  private onRestart?: () => void;
+  private onExit?: () => void;
   private lastPerformanceReportSecond = -1;
   private gameMode: GameMode = "solo";
   private multiplayerWordSequence: string[] = [];
   private multiplayerWordIndex = 0;
+  private wordDeck: string[] = [];
+  private wordDeckIndex = 0;
 
   private activeWord = "";
   private typedText = "";
@@ -96,17 +106,24 @@ export default class GameScene extends Phaser.Scene {
     super("GameScene");
   }
 
-  init({ mode = "solo", matchConfig, onGameOver, onPerformance, wordSequence }: GameSceneInitData): void {
+  init({ mode = "solo", matchConfig, onGameOver, onPerformance, onRestart, onExit, wordSequence }: GameSceneInitData): void {
     this.gameMode = mode;
-    this.multiplayerWordSequence = wordSequence && wordSequence.length > 0 ? [...wordSequence] : [];
+    this.multiplayerWordSequence = wordSequence && wordSequence.length > 0 ? [...new Set(wordSequence)] : [];
     this.multiplayerWordIndex = 0;
     this.matchConfig = matchConfig;
     this.onGameOver = onGameOver;
     this.onPerformance = onPerformance;
+    this.onRestart = onRestart;
+    this.onExit = onExit;
     this.matchDurationSeconds = matchConfig.roundTime;
     this.remainingSeconds = this.matchDurationSeconds;
     this.difficultyKey = this.getDifficultyKey(matchConfig.difficulty);
     this.wordCategory = getWordCategory(matchConfig.wordSet);
+    const preferredWords = [...new Set(getWordsForDifficulty(this.wordCategory, this.difficultyKey))];
+    const preferredWordSet = new Set(preferredWords);
+    const remainingCategoryWords = WORD_BANK[this.wordCategory].filter((word) => !preferredWordSet.has(word));
+    this.wordDeck = [...this.shuffleWords(preferredWords), ...this.shuffleWords(remainingCategoryWords)];
+    this.wordDeckIndex = 0;
     this.fallSpeedPxPerSec = GameScene.DIFFICULTY_CONFIG[this.difficultyKey].fallSpeed;
   }
 
@@ -125,15 +142,34 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    this.hudText = this.add
-      .text(12, 12, "", {
-        fontFamily: "monospace",
-        fontSize: "16px",
-        color: "#ffffff",
-        backgroundColor: "rgba(0,0,0,0.35)",
-        padding: { x: 10, y: 6 },
-      })
+    const topMetricDefinitions = ["Lives", "Score", "Time"];
+    const sideMetricDefinitions = [
+      { label: "WPM", color: "#ffffff" },
+      { label: "Accuracy", color: "#72d6ff" },
+      { label: "Error Rate", color: "#ff665f" },
+      { label: "Difficulty", color: "#ffffff" },
+    ];
+    this.topHudPanel = this.add.rectangle(0, 0, this.scale.width, 58, 0x77818a, 0.72)
+      .setOrigin(0)
+      .setStrokeStyle(1, 0xb2c0ce, 0.7)
       .setDepth(10);
+    this.topHudMetrics = topMetricDefinitions.map((label) => ({
+      label: this.add.text(0, 0, label, { fontFamily: "Arial", fontSize: "12px", color: "#ffffff", fontStyle: "bold" }).setDepth(11),
+      value: this.add.text(0, 0, "", { fontFamily: "Arial", fontSize: "19px", color: "#ffffff", fontStyle: "bold" }).setDepth(11),
+    }));
+    this.hudPanel = this.add.rectangle(0, 0, 150, 240, 0x102441, 0.88)
+      .setOrigin(0)
+      .setStrokeStyle(1, 0x5295be, 0.9)
+      .setDepth(10);
+    this.hudMetrics = sideMetricDefinitions.map(({ label, color }) => ({
+      label: this.add.text(0, 0, label, { fontFamily: "Arial", fontSize: "14px", color: "#ffffff" }).setDepth(11),
+      value: this.add.text(0, 0, "", { fontFamily: "Arial", fontSize: "22px", color, fontStyle: "bold" }).setDepth(11),
+      color,
+    }));
+    this.hudDividers = sideMetricDefinitions.slice(1).map(() =>
+      this.add.rectangle(0, 0, 150, 1, 0x5295be, 0.75).setOrigin(0).setDepth(11),
+    );
+    this.layoutHud();
 
     this.typedDisplay = this.add
       .text(this.scale.width / 2, this.scale.height - 80, "", {
@@ -159,7 +195,11 @@ export default class GameScene extends Phaser.Scene {
       .setDepth(100)
       .setVisible(false);
 
-    this.pauseMenu = new PauseMenu(this);
+    this.pauseMenu = new PauseMenu(this, {
+      isSolo: this.gameMode === "solo",
+      onRestart: () => this.onRestart?.(),
+      onExit: () => this.onExit?.(),
+    });
     this.waterEffects = new WaterEffects(this, this.WATER_LAST_FRAME);
     this.waterEffects.ensureAnimations();
 
@@ -194,6 +234,7 @@ export default class GameScene extends Phaser.Scene {
       this.typedDisplay.setPosition(gameSize.width / 2, gameSize.height - 80);
       this.gameOverDisplay.setPosition(gameSize.width / 2, gameSize.height / 2);
       this.pauseMenu.layout(gameSize.width, gameSize.height);
+      this.layoutHud();
 
       this.wordX = getLaneX(gameSize.width, this.lastLane);
       this.wordTarget.setPosition(this.wordX, this.wordY);
@@ -224,13 +265,26 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private spawnWord(): void {
+    const hasMultiplayerSequence = this.gameMode === "multiplayer" && this.multiplayerWordSequence.length > 0;
+    if (!hasMultiplayerSequence && this.wordDeckIndex >= this.wordDeck.length && this.wordDeck.length > 0) {
+      this.wordDeck = this.shuffleWords(this.wordDeck, this.activeWord);
+      this.wordDeckIndex = 0;
+    }
+
+    const sequence = hasMultiplayerSequence ? this.multiplayerWordSequence : this.wordDeck;
+    const sequenceIndex = hasMultiplayerSequence
+      ? this.multiplayerWordIndex++ % this.multiplayerWordSequence.length
+      : this.wordDeckIndex++;
+    const nextWord = sequence[sequenceIndex];
+
+    if (!nextWord) {
+      this.endMatch();
+      return;
+    }
+
+    this.activeWord = nextWord;
+
     if (this.wordCategory === "stenography") {
-      const promptAnswers = getWordsForDifficulty(this.wordCategory, this.difficultyKey);
-      const sequence = this.gameMode === "multiplayer" && this.multiplayerWordSequence.length > 0
-        ? this.multiplayerWordSequence
-        : promptAnswers;
-      this.activeWord = sequence[this.multiplayerWordIndex % sequence.length];
-      this.multiplayerWordIndex += 1;
       const prompt = getGreggPrompt(this.activeWord);
       if (!prompt) return;
 
@@ -244,16 +298,6 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
 
-    if (this.gameMode === "multiplayer") {
-      const sequence = this.multiplayerWordSequence.length > 0 ? this.multiplayerWordSequence : ["type"];
-      this.activeWord = sequence[this.multiplayerWordIndex % sequence.length];
-      this.multiplayerWordIndex += 1;
-    } else {
-      const wordPool = getWordsForDifficulty(this.wordCategory, this.difficultyKey);
-      const index = Phaser.Math.Between(0, wordPool.length - 1);
-      this.activeWord = wordPool[index];
-    }
-
     this.typedText = "";
     this.typedDisplay.setText("");
     this.typedDisplay.setColor("#ffff00");
@@ -265,6 +309,18 @@ export default class GameScene extends Phaser.Scene {
     this.wordX = getLaneX(this.scale.width, lane);
 
     this.wordTarget.setWord(this.activeWord, this.wordX, this.wordY);
+  }
+
+  private shuffleWords(words: string[], avoidFirstWord = ""): string[] {
+    const shuffled = [...new Set(words)];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Phaser.Math.Between(0, index);
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    if (shuffled.length > 1 && shuffled[0] === avoidFirstWord) {
+      [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+    }
+    return shuffled;
   }
 
   private handleTyping(key: string): void {
@@ -364,9 +420,41 @@ export default class GameScene extends Phaser.Scene {
     const accuracy = totalKeystrokes > 0 ? (this.correctKeystrokes / totalKeystrokes) * 100 : 0;
     const errorRate = totalKeystrokes > 0 ? (this.incorrectKeystrokes / totalKeystrokes) * 100 : 0;
 
-    this.hudText.setText(
-      `Lives: ${this.lives}  Score: ${this.score}  Time: ${Math.ceil(this.remainingSeconds)}  WPM: ${wpm.toFixed(1)}\nAccuracy: ${accuracy.toFixed(1)}%  Error Rate: ${errorRate.toFixed(1)}%  Difficulty: ${this.difficultyKey.toUpperCase()}`,
-    );
+    const topValues = [String(this.lives), String(this.score), `${Math.ceil(this.remainingSeconds)}s`];
+    this.topHudMetrics.forEach(({ value }, index) => value.setText(topValues[index]));
+
+    const sideValues = [
+      wpm.toFixed(1),
+      `${accuracy.toFixed(1)}%`,
+      `${errorRate.toFixed(1)}%`,
+      this.difficultyKey.toUpperCase(),
+    ];
+    this.hudMetrics.forEach(({ value }, index) => value.setText(sideValues[index]));
+  }
+
+  private layoutHud(): void {
+    const left = 12;
+    const top = 72;
+    const width = Math.min(156, Math.max(126, this.scale.width * 0.24));
+    const rowHeight = Math.min(58, (this.scale.height - 24) / this.hudMetrics.length);
+    this.topHudPanel.setPosition(0, 0).setSize(this.scale.width, 58);
+    const availableTopWidth = Math.max(0, this.scale.width - 144);
+    const topCellWidth = availableTopWidth / this.topHudMetrics.length;
+    this.topHudMetrics.forEach(({ label, value }, index) => {
+      const cellLeft = 18 + index * topCellWidth;
+      label.setPosition(cellLeft, 7);
+      value.setPosition(cellLeft, 27);
+    });
+    this.hudPanel.setPosition(left, top).setSize(width, rowHeight * this.hudMetrics.length);
+
+    this.hudMetrics.forEach(({ label, value }, index) => {
+      const rowTop = top + index * rowHeight;
+      label.setPosition(left + 12, rowTop + 7);
+      value.setPosition(left + 12, rowTop + 26);
+      if (index > 0) {
+        this.hudDividers[index - 1].setPosition(left, rowTop).setSize(width, 1);
+      }
+    });
   }
 
   private reportPerformance(force = false): void {
