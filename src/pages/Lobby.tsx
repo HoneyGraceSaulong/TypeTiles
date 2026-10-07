@@ -52,7 +52,7 @@ type SocketMessage = RoomState & {
   players?: Standing[];
 };
 
-const defaultHost = "localhost:3001";
+const defaultHost = `${window.location.hostname}:3001`;
 const LAN_ROOM_CODE_KEY = "type_tiles_lan_room_code";
 
 export default function Lobby() {

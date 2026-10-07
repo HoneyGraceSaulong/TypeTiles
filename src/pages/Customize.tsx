@@ -68,7 +68,7 @@ export default function Customize() {
         <div className="mx-auto max-w-[998px] pt-12 lg:pt-0">
           <div
             className="flex h-[196px] items-center justify-center rounded-[8px] border border-[#2967a1] bg-[#0a1325]/70"
-            style={{ backgroundImage: `linear-gradient(rgba(10,19,37,.55), rgba(10,19,37,.75)), url(${currentBackground.source})`, backgroundSize: "cover", backgroundPosition: "center" }}
+            style={{ backgroundImage: `linear-gradient(rgba(22,43,82,.5), rgba(13,27,58,.7)), url(${currentBackground.source})`, backgroundSize: "cover", backgroundPosition: "center" }}
           >
             <img alt={`${currentAvatar.label} avatar preview`} src={currentAvatar.source} className="h-[150px] w-[150px] rounded-full object-cover" />
           </div>
@@ -93,7 +93,7 @@ export default function Customize() {
             ) : (
               <>
                 <div className="text-[18px] font-medium text-white">CHOOSE BACKGROUND</div>
-                <div className="mt-5 grid max-w-[520px] grid-cols-2 gap-7">
+                <div className="mt-5 grid w-full grid-cols-2 gap-3 sm:grid-cols-4">
                   {backgrounds.map((background) => (
                     <button key={background.id} type="button" onClick={() => { setSelectedBackground(background.id); setSaved(false); }} className={`h-[104px] overflow-hidden rounded-[7px] border-2 transition ${selectedBackground === background.id ? "border-[#6a9eff]" : "border-transparent"}`} aria-pressed={selectedBackground === background.id}>
                       <img alt={background.label} src={background.source} className="h-full w-full object-cover" />

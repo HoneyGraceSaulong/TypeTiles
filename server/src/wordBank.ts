@@ -9,30 +9,54 @@ export type GreggPrompt = {
 
 export const WORD_BANK: Record<WordCategory, string[]> = {
   corporate: [
-    "team", "goal", "plan", "staff", "client", "office", "budget", "career", "report", "policy", "project", "meeting",
-    "company", "manager", "workflow", "deadline", "strategy", "training", "resource", "planning", "proposal", "business",
-  ],
-  communication: [
-    "talk", "call", "chat", "note", "tone", "reply", "email", "listen", "message", "contact", "dialogue", "speaker",
-    "feedback", "meeting", "clarify", "channel", "response", "briefing", "question", "announce", "conversation", "statement",
-  ],
-  records: [
-    "log", "file", "date", "name", "code", "form", "data", "entry", "index", "label", "record", "folder",
-    "archive", "history", "source", "version", "storage", "catalog", "document", "register", "database", "reference",
-  ],
-  accounting: [
-    "tax", "cash", "cost", "sale", "rate", "loan", "fund", "audit", "asset", "credit", "debit", "invoice",
-    "income", "profit", "ledger", "balance", "payment", "expense", "account", "payable", "revenue", "forecast",
-  ],
-  technology: [
-    "app", "code", "data", "file", "node", "web", "chip", "cloud", "debug", "server", "binary", "script",
-    "system", "network", "kernel", "packet", "device", "browser", "runtime", "storage", "protocol", "database",
-  ],
-  general: [
-    "cat", "dog", "tree", "type", "key", "true", "nice", "wait", "sound", "busy", "program", "framework",
-    "bright", "garden", "summer", "window", "simple", "travel", "market", "picture", "weather", "practice",
-  ],
-  stenography: [],
+  "company", "business", "manager", "employee", "executive", "meeting", "office", "client", "project", "strategy", "management", "partnership",
+  "leadership", "organization", "enterprise", "proposal", "contract", "department", "performance", "productivity", "staff", "team", "work",
+  "job", "boss", "desk", "firm", "career", "workplace", "supervisor", "policy", "corporation", "administration", "entrepreneurship",
+  "professionalism", "accountability", "stakeholder", "deadline", "planning", "budget", "resource", "workflow", "training", "report", "goal",
+  "target", "industry", "promotion", "salary", "workforce"
+],
+
+communication: [
+  "message", "conversation", "discussion", "information", "communication", "speaking", "listening", "writing", "language", "feedback", "presentation", "announcement",
+  "interview", "correspondence", "interaction", "dialogue", "expression", "explanation", "question", "response", "talk", "call", "reply",
+  "chat", "voice", "note", "read", "write", "speak", "send", "email", "meeting", "letter", "report", "request", "confidentiality",
+  "negotiation", "interpretation", "collaboration", "professionalism", "documentation", "clarification", "statement", "speaker", "channel", "contact",
+  "briefing", "instruction", "conversation"
+],
+
+records: [
+  "document", "file", "record", "archive", "folder", "report", "database", "storage", "retrieval", "index", "register", "receipt",
+  "certificate", "reference", "history", "transaction", "documentation", "classification", "confidential", "verification", "data", "copy", "form",
+  "list", "note", "paper", "log", "name", "date", "filing", "tracking", "preservation", "retention", "confidentiality", "organization",
+  "digitization", "disposition", "authentication", "accessibility", "catalog", "entry", "label", "version", "source", "backup", "submission",
+  "approval", "identifier", "register"
+],
+
+accounting: [
+  "account", "balance", "budget", "expense", "income", "revenue", "profit", "loss", "invoice", "payment", "tax", "audit",
+  "asset", "liability", "capital", "payroll", "financial", "transaction", "cashflow", "ledger", "cash", "cost", "sale",
+  "pay", "bill", "loan", "bank", "debt", "price", "receipt", "accounting", "expenditure", "reconciliation", "depreciation", "receivables",
+  "bookkeeping", "auditability", "credit", "debit", "fund", "forecast", "interest", "savings", "finance", "purchase", "earnings",
+  "equity", "statement", "currency", "investment"
+],
+
+technology: [
+  "computer", "software", "hardware", "internet", "network", "database", "system", "program", "application", "website", "server", "security",
+  "password", "digital", "technology", "artificial", "intelligence", "cloud", "data", "programming", "file", "mouse", "screen", "click",
+  "email", "app", "web", "scan", "keyboard", "printer", "information", "cybersecurity", "automation", "encryption", "integration",
+  "accessibility", "infrastructure", "connectivity", "browser", "coding", "developer", "framework", "storage", "networking", "processor", "device",
+  "software", "hardware"
+],
+
+general: [
+  "school", "student", "family", "community", "people", "country", "environment", "education", "health", "knowledge", "experience",
+  "important", "different", "information", "development", "opportunity", "responsibility", "success", "activity", "situation", "class", "work",
+  "task", "time", "goal", "plan", "skill", "team", "subject", "project", "schedule", "deadline", "practice", "training",
+  "productivity", "career", "professionalism", "organization", "leadership", "performance", "cooperation", "efficiency", "competency", "communication", "future",
+  "problem", "solution", "progress", "challenge"
+],
+
+stenography: [],
 };
 
 // Verified Gregg shorthand assets and prompt mappings must be supplied before gameplay is enabled.

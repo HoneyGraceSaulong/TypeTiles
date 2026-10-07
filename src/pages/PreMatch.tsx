@@ -64,7 +64,8 @@ export default function PreMatch() {
   }, [matchConfig, navigate]);
 
   return (
-    <section className="hud-panel rounded-[2rem] p-6 text-center">
+    <section className="flex h-full min-h-0 items-center justify-center overflow-y-auto p-4">
+      <div className="hud-panel w-full max-w-[640px] rounded-[2rem] p-6 text-center">
       <div className="text-xs uppercase tracking-[0.35em] text-emerald-300">
         Pre-Match
       </div>
@@ -75,7 +76,7 @@ export default function PreMatch() {
 
       {error ? <p className="mt-3 text-red-300">{error}</p> : null}
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+      <div className="mt-6 grid gap-4">
         <div className="rounded-[1.5rem] border border-white/10 bg-white/[0.03] p-5 text-left text-slate-300">
           <div className="text-xs uppercase tracking-[0.3em] text-slate-400">
             Practice Session
@@ -125,6 +126,7 @@ export default function PreMatch() {
             configuration to the game scene.
           </div>
         </div>
+      </div>
       </div>
     </section>
   );
