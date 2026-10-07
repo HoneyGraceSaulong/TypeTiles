@@ -47,7 +47,7 @@ export function getWordCategory(value: string): WordCategory {
   if (normalized === "records") return "records";
   if (normalized === "accounting") return "accounting";
   if (normalized === "technology") return "technology";
-  if (normalized === "stenography" || normalized === "greggshorthand") return "stenography";
+  if (normalized === "steno " || normalized === "greggshorthand") return "stenography";
   return "general";
 }
 
