@@ -4,6 +4,8 @@ import jacqAvatar from "../assets/avatars/ptc_jacq.png";
 import kylaAvatar from "../assets/avatars/ptc_kyla.png";
 import liscanoAvatar from "../assets/avatars/ptc_liscano.png";
 import bluesBackground from "../assets/backround/blues.png";
+import cityBackground from "../assets/backround/city.jpg";
+import officeBackground from "../assets/backround/office.jpg";
 import voltsBackground from "../assets/backround/volts.png";
 
 export const PROFILE_AVATARS = {
@@ -17,6 +19,8 @@ export const PROFILE_AVATARS = {
 export const PROFILE_BACKGROUNDS = {
   blues: { source: bluesBackground, label: "Blues" },
   volts: { source: voltsBackground, label: "Volts" },
+  office: { source: officeBackground, label: "Office" },
+  city: { source: cityBackground, label: "City" },
 } as const;
 
 export type ProfileAvatarId = keyof typeof PROFILE_AVATARS;

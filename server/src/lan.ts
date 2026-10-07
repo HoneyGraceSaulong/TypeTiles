@@ -3,7 +3,7 @@ import { IncomingMessage } from "http";
 import { WebSocket, WebSocketServer } from "ws";
 import { getDatabase } from "./db.js";
 import { normalizeRole, verifyToken, type AppRole } from "./auth.js";
-import { getDifficultyKey, getWordsForDifficulty, getWordCategory, type WordCategory } from "./wordBank.js";
+import { getDifficultyKey, getWordsForDifficulty, getWordCategory, WORD_BANK, type WordCategory } from "./wordBank.js";
 
 const MAX_PLAYERS = 8;
 const COUNTDOWN_DELAY_MS = 3000;
@@ -435,8 +435,16 @@ function normalizeMatchConfig(input: { wordSet?: string; difficulty?: string; ro
 function createWordSequence(config: ClassroomMatchConfig): string[] {
   const difficulty = getDifficultyKey(config.difficulty);
   if (!difficulty) return [];
-  const pool = getWordsForDifficulty(config.wordSet, difficulty);
-  if (pool.length === 0) return [];
-  const length = Math.max(12, Math.ceil(config.roundTime / 3));
-  return Array.from({ length }, (_, index) => pool[index % pool.length]);
+  const preferredWords = [...new Set(getWordsForDifficulty(config.wordSet, difficulty))];
+  const preferredWordSet = new Set(preferredWords);
+  const remainingCategoryWords = [...new Set(WORD_BANK[config.wordSet])].filter((word) => !preferredWordSet.has(word));
+  const shuffle = (words: string[]) => {
+    const shuffled = [...words];
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(Math.random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    return shuffled;
+  };
+  return [...shuffle(preferredWords), ...shuffle(remainingCategoryWords)];
 }

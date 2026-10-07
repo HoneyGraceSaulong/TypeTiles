@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CheckCheck, Star, Zap, type LucideIcon } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { mockMatchConfig } from "../lib/mockData";
@@ -16,11 +16,14 @@ const categories = [
   { label: "TECHNOLOGY", image: `${assetRoot}/image8.png`, dimmed: true },
   { label: "GENERAL", solid: true },
   { label: "STENOGRAPHY", solid: true },
+  { label: "COMING SOON", solid: true, unavailable: true },
+  { label: "COMING SOON", solid: true, unavailable: true },
 ] as const;
 
 const difficultyOptions = ["Easy", "Normal", "Hard"] as const;
 
 type CategoryLabel = (typeof categories)[number]["label"];
+type PlayableCategory = Exclude<CategoryLabel, "COMING SOON">;
 type DifficultyLabel = (typeof difficultyOptions)[number];
 
 function HomeStatIcon({ icon: Icon, alt }: { icon: LucideIcon; alt: string }) {
@@ -50,11 +53,26 @@ export default function Dashboard() {
     { icon: CheckCheck, label: "Accuracy", value: dashboardStats ? `${dashboardStats.avg_accuracy.toFixed(1)}%` : "...", valueClassName: "text-emerald-400" },
     { icon: Star, label: "Max Combo", value: dashboardStats ? String(dashboardStats.top_combo) : "...", valueClassName: "text-amber-300" },
   ] as const;
-  const [selectedCategory, setSelectedCategory] = useState<CategoryLabel | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<PlayableCategory | null>(null);
   const [selectedDifficulty, setSelectedDifficulty] = useState<DifficultyLabel>("Normal");
+  const [comingSoonNote, setComingSoonNote] = useState(false);
+  const comingSoonTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(comingSoonTimer.current), []);
 
   const openProfileModal = () => {
     navigate("/app/customize");
+  };
+
+  const showComingSoonNote = () => {
+    setComingSoonNote(true);
+    window.clearTimeout(comingSoonTimer.current);
+    comingSoonTimer.current = window.setTimeout(() => setComingSoonNote(false), 3600);
+  };
+
+  const openCategoryPicker = () => {
+    setSelectedCategory((current) => current ?? "GENERAL");
+    setSelectedDifficulty("Normal");
   };
 
   const handleStartFromCategory = () => {
@@ -74,11 +92,11 @@ export default function Dashboard() {
   };
 
   return (
-    <section className="h-full overflow-y-auto pb-4">
-      <h1 className="px-1 text-[1.95rem] font-semibold tracking-[-0.03em] text-white sm:text-[2.15rem]">Welcome to Type Tiles!</h1>
+    <section className="flex h-full min-h-0 flex-col overflow-hidden pb-4">
+      <h1 className="shrink-0 px-1 text-[1.95rem] font-semibold tracking-[-0.03em] text-white sm:text-[2.15rem]">Welcome to Type Tiles!</h1>
 
       <article
-        className="mt-4 rounded-[10px] border border-[#3d3d3d]/70 bg-[#c3d9ed] bg-cover bg-center px-4 py-3 text-slate-900 shadow-[0_20px_50px_rgba(5,8,24,0.35)]"
+        className="mt-4 shrink-0 rounded-[10px] border border-[#3d3d3d]/70 bg-[#c3d9ed] bg-cover bg-center px-4 py-3 text-slate-900 shadow-[0_20px_50px_rgba(5,8,24,0.35)]"
         style={{ backgroundImage: `linear-gradient(rgba(195,217,237,.84), rgba(195,217,237,.84)), url(${getProfileBackground(user?.background).source})` }}
       >
             <div className="flex items-center gap-3 sm:gap-4">
@@ -87,7 +105,7 @@ export default function Dashboard() {
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="text-[0.7rem] uppercase tracking-[0.16em] text-[#3d3d3d]">Player</div>
+                <div className="text-[0.7rem] uppercase tracking-[0.16em] text-[#3d3d3d]">{user?.role === "teacher" ? "Teacher" : "Player"}</div>
                 <div className="mt-1 truncate text-[1.85rem] font-semibold leading-none tracking-[-0.03em] text-black">{user?.displayName || user?.username || "Player"}</div>
                 <div className="mt-3 text-[0.68rem] uppercase tracking-[0.12em] text-[#3d3d3d]">
                   {rank !== null ? `Rank # ${rank} Global` : "Rank unavailable"}
@@ -113,8 +131,23 @@ export default function Dashboard() {
             </button>
       </article>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[321px_minmax(0,1fr)] xl:gap-[35px]">
-        <div className="space-y-4">
+      <div className="mt-4 grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden lg:grid-cols-[321px_minmax(0,1fr)] lg:grid-rows-1 xl:gap-[35px]">
+        <div className="min-h-0 space-y-4">
+          <button
+            type="button"
+            onClick={openCategoryPicker}
+            className="flex h-[50px] w-full items-center justify-center rounded-[8px] border border-[#bde9ff] bg-[#7357f1] px-6 text-[1rem] font-medium text-white shadow-[0_14px_30px_rgba(80,63,220,0.35)] transition hover:brightness-110"
+          >
+            Start Game
+          </button>
+          {user?.role === "teacher" ? (
+            <Link
+              to="/app/lobby"
+              className="flex h-[50px] w-full items-center justify-center rounded-[8px] border border-[#bde9ff] bg-[#7357f1] px-6 text-[1rem] font-medium text-white shadow-[0_14px_30px_rgba(80,63,220,0.35)] transition hover:brightness-110"
+            >
+              Create Classroom
+            </Link>
+          ) : null}
           <article className="rounded-[10px] border border-[#2967a1] bg-[#1d234a] p-4 shadow-[0_16px_30px_rgba(4,8,25,0.35)]">
             <div className="space-y-4">
               {statItems.map((item) => (
@@ -144,24 +177,19 @@ export default function Dashboard() {
           </article>
         </div>
 
-        <div className="space-y-4">
-          <div className="flex justify-start">
-            <Link
-              to="/app/play"
-              className="inline-flex min-w-[158px] items-center justify-center rounded-[8px] border border-[#bde9ff] bg-[#7357f1] px-6 py-3 text-[1rem] font-medium text-white shadow-[0_14px_30px_rgba(80,63,220,0.35)] transition hover:brightness-110"
-            >
-              Start Game
-            </Link>
-          </div>
-
-          <div className="pr-1">
+        <div className="flex min-h-0 flex-col">
+          <div className="scrollbar-hidden min-h-0 flex-1 overflow-y-auto pr-1">
             <div className="grid gap-[10px] sm:grid-cols-2 xl:grid-cols-3">
-            {categories.map((category) => (
+            {categories.map((category, index) => (
               <button
                 type="button"
-                key={category.label}
+                key={`${category.label}-${index}`}
                 onClick={() => {
-                  setSelectedCategory(category.label);
+                  if ("unavailable" in category && category.unavailable) {
+                    showComingSoonNote();
+                    return;
+                  }
+                  setSelectedCategory(category.label as PlayableCategory);
                   setSelectedDifficulty("Normal");
                 }}
                 className="relative aspect-[4/3] overflow-hidden rounded-[8px] border-2 border-[#1183bb] bg-[#1a2349] text-left shadow-[0_16px_30px_rgba(4,8,25,0.35)] transition hover:scale-[1.01] hover:border-sky-300 xl:aspect-[1/1]"
@@ -187,11 +215,18 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {comingSoonNote ? (
+        <div role="status" className="fixed bottom-5 left-1/2 z-[60] w-[min(92vw,440px)] -translate-x-1/2 rounded-lg border border-sky-300/70 bg-[#101a35]/95 px-5 py-4 text-center text-white shadow-[0_12px_40px_rgba(0,0,0,0.55)] backdrop-blur">
+          <div className="font-semibold text-sky-200">Coming Soon!</div>
+          <div className="mt-1 text-sm text-white/85">This category is currently unavailable. Stay tuned for more updates!</div>
+        </div>
+      ) : null}
+
       {selectedCategory ? (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-[2px]">
-          <div className="w-full max-w-[476px] overflow-hidden rounded-[8px] border border-[#5da3c5] bg-[#13173b] shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
+          <div className="scrollbar-hidden max-h-[90vh] w-full max-w-[680px] overflow-y-auto rounded-[8px] border border-[#5da3c5] bg-[#13173b] shadow-[0_24px_60px_rgba(0,0,0,0.55)]">
             <div className="h-[116px] w-full overflow-hidden">
-              <img alt="Category header" className="h-full w-full object-cover" src={`${assetRoot}/image5.png`} />
+              <img alt="" className="h-full w-full object-cover" src={categories.find((category) => category.label === selectedCategory && !("unavailable" in category && category.unavailable) && "image" in category)?.image ?? `${assetRoot}/image5.png`} />
             </div>
 
             <div className="px-7 py-6">
@@ -201,10 +236,29 @@ export default function Dashboard() {
                 <div className="h-px flex-1 bg-white/70" />
               </div>
 
-              <div className="mt-4 flex justify-center">
-                <div className="rounded-[8px] border-2 border-[#5da3c5] bg-white px-10 py-[3px] font-['Roboto'] text-[1.55rem] font-bold text-[#0898dd]">
-                  {selectedCategory.charAt(0) + selectedCategory.slice(1).toLowerCase()}
-                </div>
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {categories.map((category, index) => {
+                  const unavailable = "unavailable" in category && category.unavailable;
+                  const selected = !unavailable && category.label === selectedCategory;
+
+                  return (
+                    <button
+                      key={`${category.label}-${index}`}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => {
+                        if (unavailable) {
+                          showComingSoonNote();
+                          return;
+                        }
+                        setSelectedCategory(category.label as PlayableCategory);
+                      }}
+                      className={`min-h-[44px] rounded-[6px] border px-2 py-2 text-center font-['Concert_One'] text-sm transition sm:text-base ${unavailable ? "border-white/20 bg-white/10 text-white/55 hover:border-sky-300/60" : selected ? "border-[#5da3c5] bg-[#0898dd] text-white ring-2 ring-sky-300/70" : "border-[#5da3c5] bg-white text-[#0898dd] hover:bg-sky-50"}`}
+                    >
+                      {category.label}
+                    </button>
+                  );
+                })}
               </div>
 
               <div className="mt-6 flex items-center gap-3 text-white/90">
@@ -226,20 +280,20 @@ export default function Dashboard() {
                 ))}
               </div>
 
-              <div className="mt-6 flex justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedCategory(null)}
-                  className="rounded-[8px] border border-white/30 bg-white/10 px-5 py-2 text-white"
-                >
-                  Cancel
-                </button>
+              <div className="mt-6 flex justify-center gap-3">
                 <button
                   type="button"
                   onClick={handleStartFromCategory}
-                  className="rounded-[8px] border border-[#5da3c5] bg-white px-5 py-2 font-bold text-[#0898dd]"
+                  className="order-1 rounded-[8px] border border-[#5da3c5] bg-white px-5 py-2 font-bold text-[#0898dd]"
                 >
                   Start Game
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory(null)}
+                  className="order-2 rounded-[8px] border border-white/30 bg-white/10 px-5 py-2 text-white"
+                >
+                  Cancel
                 </button>
               </div>
             </div>

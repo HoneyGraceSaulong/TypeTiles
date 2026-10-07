@@ -8,20 +8,33 @@ type Props = {
   mode?: "solo" | "multiplayer";
   roomCode?: string;
   matchConfig: MatchConfig;
+  backgroundImage?: string;
   onGameOver: (result: GameResult) => void;
+  onRestart?: () => void;
+  onExit?: () => void;
   onPerformance?: (performance: GamePerformance) => void;
   wordSequence?: string[];
   startAt?: number;
 };
 
-export function GameMount({ mode = "solo", roomCode, matchConfig, onGameOver, onPerformance, wordSequence, startAt }: Props) {
+export function GameMount({ mode = "solo", roomCode, matchConfig, backgroundImage, onGameOver, onRestart, onExit, onPerformance, wordSequence, startAt }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const onGameOverRef = useRef(onGameOver);
+  const onRestartRef = useRef(onRestart);
+  const onExitRef = useRef(onExit);
   const onPerformanceRef = useRef(onPerformance);
 
   useEffect(() => {
     onGameOverRef.current = onGameOver;
   }, [onGameOver]);
+
+  useEffect(() => {
+    onRestartRef.current = onRestart;
+  }, [onRestart]);
+
+  useEffect(() => {
+    onExitRef.current = onExit;
+  }, [onExit]);
 
   useEffect(() => {
     onPerformanceRef.current = onPerformance;
@@ -57,6 +70,8 @@ export function GameMount({ mode = "solo", roomCode, matchConfig, onGameOver, on
       roomCode,
       matchConfig,
       onGameOver: (result: GameResult) => onGameOverRef.current(result),
+      onRestart: () => onRestartRef.current?.(),
+      onExit: () => onExitRef.current?.(),
       onPerformance: (performance: GamePerformance) => onPerformanceRef.current?.(performance),
       wordSequence,
       startAt,
@@ -77,12 +92,10 @@ export function GameMount({ mode = "solo", roomCode, matchConfig, onGameOver, on
   }, [matchConfig, mode, roomCode, startAt, wordSequence]);
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden rounded-[2rem] border border-white/10 bg-black/30">
-      <div className="absolute left-4 top-4 z-10 rounded-2xl border border-emerald-400/30 bg-black/50 px-4 py-3 text-xs uppercase tracking-[0.25em] text-emerald-200">
-        Match Config: {matchConfig.mode} / {matchConfig.difficulty} /{" "}
-        {matchConfig.roundTime}s / {matchConfig.wordSet}
-      </div>
-
+    <div
+      className="relative min-h-0 flex-1 overflow-hidden rounded-[2rem] border border-white/10 bg-black/30 bg-cover bg-center"
+      style={backgroundImage ? { backgroundImage: `linear-gradient(rgba(25, 48, 91, 0.12), rgba(12, 25, 56, 0.18)), url("${backgroundImage}")` } : undefined}
+    >
       <div
         ref={hostRef}
         className="game-stage h-full min-h-0 w-full"

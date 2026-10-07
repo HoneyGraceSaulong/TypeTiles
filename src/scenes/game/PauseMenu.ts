@@ -4,11 +4,17 @@ export class PauseMenu {
   private readonly scene: Phaser.Scene;
   private readonly pauseButton: Phaser.GameObjects.Container;
   private readonly pauseModal: Phaser.GameObjects.Container;
+  private readonly isSolo: boolean;
+  private readonly onRestart: () => void;
+  private readonly onExit: () => void;
 
   private paused = false;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, options: { isSolo: boolean; onRestart: () => void; onExit: () => void }) {
     this.scene = scene;
+    this.isSolo = options.isSolo;
+    this.onRestart = options.onRestart;
+    this.onExit = options.onExit;
 
     const btnBg = this.scene.add
       .rectangle(0, 0, 86, 32, 0x101820, 0.85)
@@ -32,13 +38,14 @@ export class PauseMenu {
       .setOrigin(0)
       .setInteractive();
 
+    const panelHeight = this.isSolo ? 258 : 150;
     const panel = this.scene.add
-      .rectangle(0, 0, 360, 220, 0x0f1620, 0.95)
+      .rectangle(0, 0, 300, panelHeight, 0x0f1620, 0.95)
       .setStrokeStyle(3, 0x66ccff, 1)
       .setOrigin(0.5);
 
     const title = this.scene.add
-      .text(0, -46, "Paused", {
+      .text(0, this.isSolo ? -88 : -40, "Paused", {
         fontFamily: "monospace",
         fontSize: "30px",
         color: "#ffffff",
@@ -46,33 +53,36 @@ export class PauseMenu {
       })
       .setOrigin(0.5);
 
-    const hint = this.scene.add
-      .text(0, -10, "Press ESC or click Resume", {
-        fontFamily: "monospace",
-        fontSize: "14px",
-        color: "#99ccee",
-      })
-      .setOrigin(0.5);
+    const modalChildren: Phaser.GameObjects.GameObject[] = [backdrop, panel, title];
+    const actions = this.isSolo
+      ? [
+          { label: "Resume", y: -30, action: () => this.close() },
+          { label: "Restart", y: 26, action: this.onRestart },
+          { label: "Exit", y: 82, action: this.onExit },
+        ]
+      : [{ label: "Resume", y: 20, action: () => this.close() }];
 
-    const resumeBg = this.scene.add
-      .rectangle(0, 50, 150, 44, 0x1f7acc, 1)
-      .setStrokeStyle(2, 0xffffff, 0.9)
-      .setInteractive({ useHandCursor: true });
-    const resumeText = this.scene.add
-      .text(0, 50, "Resume", {
-        fontFamily: "monospace",
-        fontSize: "20px",
-        color: "#ffffff",
-        fontStyle: "bold",
-      })
-      .setOrigin(0.5);
+    for (const { label, y, action } of actions) {
+      const button = this.scene.add
+        .rectangle(0, y, 172, 40, 0x1f7acc, 1)
+        .setStrokeStyle(2, 0xffffff, 0.9)
+        .setInteractive({ useHandCursor: true });
+      const text = this.scene.add
+        .text(0, y, label, {
+          fontFamily: "monospace",
+          fontSize: "19px",
+          color: "#ffffff",
+          fontStyle: "bold",
+        })
+        .setOrigin(0.5);
+      button.on("pointerup", action);
+      modalChildren.push(button, text);
+    }
 
     this.pauseModal = this.scene.add
-      .container(0, 0, [backdrop, panel, title, hint, resumeBg, resumeText])
+      .container(0, 0, modalChildren)
       .setDepth(200)
       .setVisible(false);
-
-    resumeBg.on("pointerup", () => this.close());
 
     this.layout(this.scene.scale.width, this.scene.scale.height);
   }
