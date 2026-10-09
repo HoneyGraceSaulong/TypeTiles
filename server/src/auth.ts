@@ -1,13 +1,23 @@
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your_super_secret_key_change_this";
+const developmentSecret = randomBytes(32).toString("hex");
+export function jwtSecret(): string {
+  const secret = process.env.JWT_SECRET?.trim();
+  const strong = Boolean(secret && secret.length >= 32 && !/change.this|replace|your.*secret/i.test(secret));
+  if (process.env.NODE_ENV === "production" && !strong) {
+    throw new Error("Production requires a strong configured JWT_SECRET of at least 32 characters.");
+  }
+  return strong ? secret! : developmentSecret;
+}
 const JWT_EXPIRY = "7d";
 
 export interface JWTPayload {
   userId: number;
   username: string;
   role: string;
+  sessionVersion?: number;
 }
 
 export type AppRole = "student" | "teacher" | "admin";
@@ -27,12 +37,14 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 }
 
 export function generateToken(payload: JWTPayload): string {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+  return jwt.sign({ ...payload, sessionVersion: payload.sessionVersion ?? 0 }, jwtSecret(), { expiresIn: JWT_EXPIRY });
 }
 
 export function verifyToken(token: string): JWTPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as JWTPayload;
+    const payload = jwt.verify(token, jwtSecret(), { algorithms: ["HS256"] }) as JWTPayload;
+    if (!Number.isInteger(payload.userId) || (payload.sessionVersion !== undefined && (!Number.isInteger(payload.sessionVersion) || payload.sessionVersion < 0))) return null;
+    return payload;
   } catch (error) {
     return null;
   }

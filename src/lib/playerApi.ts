@@ -75,6 +75,19 @@ type AuthResponse = {
   user: PlayerUser;
 };
 
+export type RegistrationResponse = { message: string; verificationRequired: true };
+
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 type MeResponse = {
   user: PlayerUser;
   stats?: PlayerStats;
@@ -90,9 +103,9 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
     },
   });
 
-  const data = (await response.json().catch(() => ({}))) as T & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as T & { error?: string; code?: string };
   if (!response.ok) {
-    throw new Error(data.error || "Request failed");
+    throw new ApiError(typeof data.error === "string" ? data.error : "Request failed", response.status, typeof data.code === "string" ? data.code : undefined);
   }
 
   return data;
@@ -103,8 +116,8 @@ export function registerPlayer(input: {
   email: string;
   password: string;
   displayName: string;
-}): Promise<AuthResponse> {
-  return request<AuthResponse>("/auth/register", {
+}): Promise<RegistrationResponse> {
+  return request<RegistrationResponse>("/auth/register", {
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -115,6 +128,26 @@ export function loginPlayer(username: string, password: string): Promise<AuthRes
     method: "POST",
     body: JSON.stringify({ username, password }),
   });
+}
+
+export function requestPasswordReset(email: string, signal?: AbortSignal): Promise<{ message: string }> {
+  return request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }), signal });
+}
+
+export function resendEmailVerificationCode(email: string, signal?: AbortSignal): Promise<{ message: string }> {
+  return request("/auth/resend-verification-code", { method: "POST", body: JSON.stringify({ email }), signal });
+}
+
+export function verifyEmail(email: string, code: string, signal?: AbortSignal): Promise<{ message: string }> {
+  return request("/auth/verify-email", { method: "POST", body: JSON.stringify({ email, code }), signal });
+}
+
+export function verifyResetCode(email: string, code: string, signal?: AbortSignal): Promise<{ valid: boolean }> {
+  return request("/auth/verify-reset-code", { method: "POST", body: JSON.stringify({ email, code }), signal });
+}
+
+export function resetPlayerPassword(email: string, code: string, newPassword: string, signal?: AbortSignal): Promise<{ message: string }> {
+  return request("/auth/reset-password", { method: "POST", body: JSON.stringify({ email, code, newPassword }), signal });
 }
 
 export function getCurrentPlayer(token: string): Promise<MeResponse> {

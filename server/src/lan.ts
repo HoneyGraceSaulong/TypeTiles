@@ -4,6 +4,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { getDatabase } from "./db.js";
 import { normalizeRole, verifyToken, type AppRole } from "./auth.js";
 import { getDifficultyKey, getWordsForDifficulty, getWordCategory, WORD_BANK, type WordCategory } from "./wordBank.js";
+import { sessionEvents } from "./sessionEvents.js";
 
 const MAX_PLAYERS = 8;
 const COUNTDOWN_DELAY_MS = 3000;
@@ -41,6 +42,8 @@ type Player = {
   ready: boolean;
   isHost: boolean;
   socket: WebSocket;
+  token?: string;
+  pendingToken?: string;
   performance?: PlayerPerformance;
 };
 
@@ -145,10 +148,10 @@ async function authenticatePlayer(token: string | undefined) {
   if (!payload) return null;
 
   const user = await getDatabase().get(
-    "SELECT id, username, role, is_banned FROM users WHERE id = ?",
+    "SELECT id, username, display_name, role, is_banned, session_version, email_verified FROM users WHERE id = ?",
     [payload.userId],
   );
-  if (!user || user.is_banned) return null;
+  if (!user || user.is_banned || user.email_verified !== 1 || (payload.sessionVersion ?? 0) !== user.session_version) return null;
 
   return {
     userId: user.id as number,
@@ -175,6 +178,34 @@ function leaveRoom(player: Player) {
 
 export function attachLanServer(server: import("http").Server) {
   const webSocketServer = new WebSocketServer({ server, path: "/ws" });
+  const connections = new Set<Player>();
+  const invalidate = (userId: number) => {
+    for (const player of connections) {
+      const payload = player.token ? verifyToken(player.token) : null;
+      const pending = player.pendingToken ? verifyToken(player.pendingToken) : null;
+      if (player.userId !== userId && payload?.userId !== userId && pending?.userId !== userId) continue;
+      leaveRoom(player);
+      player.socket.close(4001, "Session expired. Please log in again.");
+    }
+  };
+  sessionEvents.on("invalidate", invalidate);
+  // Also detects resets from another backend process; every message is revalidated below.
+  const sweep = setInterval(() => {
+    for (const player of connections) {
+      if (!player.token) continue;
+      void authenticatePlayer(player.token).then((identity) => {
+        if (!identity) {
+          leaveRoom(player);
+          player.socket.close(4001, "Session expired. Please log in again.");
+        }
+      }).catch(() => player.socket.close(4001, "Session unavailable."));
+    }
+  }, 5000);
+  sweep.unref();
+  webSocketServer.on("close", () => {
+    clearInterval(sweep);
+    sessionEvents.off("invalidate", invalidate);
+  });
 
   webSocketServer.on("connection", (socket: WebSocket, request: IncomingMessage) => {
     const player: Player = {
@@ -184,6 +215,7 @@ export function attachLanServer(server: import("http").Server) {
       isHost: false,
       socket,
     };
+    connections.add(player);
 
     socket.on("message", async (raw) => {
       let message: ClientMessage;
@@ -195,12 +227,21 @@ export function attachLanServer(server: import("http").Server) {
       }
 
       try {
+        if (socket.readyState !== WebSocket.OPEN) return;
+        if (player.token && !await authenticatePlayer(player.token)) {
+          leaveRoom(player);
+          socket.close(4001, "Session expired. Please log in again.");
+          return;
+        }
+        if (socket.readyState !== WebSocket.OPEN) return;
+        if (message.type === "create_room" || message.type === "join_room") player.pendingToken = message.token;
         if (message.type === "create_room") {
           if (player.isHost || [...rooms.values()].some((room) => room.players.has(player.id))) {
             send(socket, { type: "error", message: "You are already in a room" });
             return;
           }
           const identity = await authenticatePlayer(message.token);
+          if (socket.readyState !== WebSocket.OPEN) return;
           if (!identity) {
             send(socket, { type: "error", message: "Authentication is required to create a room." });
             return;
@@ -221,6 +262,7 @@ export function attachLanServer(server: import("http").Server) {
           }
 
           player.name = identity.username;
+          player.token = message.token;
           player.displayName = identity.displayName;
           player.isHost = true;
           player.userId = identity.userId;
@@ -238,6 +280,7 @@ export function attachLanServer(server: import("http").Server) {
             classroomResultsSent: false,
             players: new Map([[player.id, player]]),
           };
+          if (!await authenticatePlayer(player.token) || socket.readyState !== WebSocket.OPEN) return;
           rooms.set(room.code, room);
           await getDatabase().run(
             "INSERT INTO match_participants (match_id, user_id) VALUES (?, ?)",
@@ -255,6 +298,7 @@ export function attachLanServer(server: import("http").Server) {
             return;
           }
           const identity = await authenticatePlayer(message.token);
+          if (socket.readyState !== WebSocket.OPEN) return;
           if (!identity) {
             send(socket, { type: "error", message: "Authentication is required to join a room." });
             return;
@@ -275,6 +319,7 @@ export function attachLanServer(server: import("http").Server) {
           }
 
           player.name = identity.username;
+          player.token = message.token;
           player.displayName = identity.displayName;
           player.userId = identity.userId;
           player.role = identity.role;
@@ -306,6 +351,7 @@ export function attachLanServer(server: import("http").Server) {
 
         if (message.type === "update_match_config") {
           const identity = await authenticatePlayer(message.token);
+          if (socket.readyState !== WebSocket.OPEN) return;
           if (!identity || identity.role !== "teacher" || identity.userId !== room.ownerUserId || player.userId !== room.ownerUserId) {
             send(socket, { type: "error", message: "Only the teacher who owns this classroom can update match settings." });
             return;
@@ -329,6 +375,7 @@ export function attachLanServer(server: import("http").Server) {
           broadcast(room);
         } else if (message.type === "cancel_room") {
           const identity = await authenticatePlayer(message.token);
+          if (socket.readyState !== WebSocket.OPEN) return;
           if (!identity || identity.role !== "teacher" || identity.userId !== room.ownerUserId || player.userId !== room.ownerUserId) {
             send(socket, { type: "error", message: "Only the teacher who owns this classroom can cancel it." });
             return;
@@ -410,10 +457,15 @@ export function attachLanServer(server: import("http").Server) {
       } catch (error) {
         console.error("LAN message error:", error);
         send(socket, { type: "error", message: "The host could not process that request." });
+      } finally {
+        player.pendingToken = undefined;
       }
     });
 
-    socket.on("close", () => leaveRoom(player));
+    socket.on("close", () => {
+      connections.delete(player);
+      leaveRoom(player);
+    });
   });
 
   return webSocketServer;

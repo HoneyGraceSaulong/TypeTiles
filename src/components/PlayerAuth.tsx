@@ -4,6 +4,7 @@ import { Dices } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { usePlayerAuth } from "../lib/PlayerAuthContext";
 import { HudBackground } from "./HudBackground";
+import { ApiError } from "../lib/playerApi";
 
 export default function PlayerAuth() {
   const location = useLocation();
@@ -17,21 +18,27 @@ export default function PlayerAuth() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [verificationRequired, setVerificationRequired] = useState(false);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
+    setVerificationRequired(false);
     setSubmitting(true);
 
     try {
       if (isRegister) {
         await register({ username, email, password, displayName });
+        setPassword("");
+        navigate("/verify-email", { replace: true });
       } else {
         await login(username, password);
+        navigate(destination, { replace: true });
       }
-      navigate(destination, { replace: true });
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Unable to authenticate");
+      const pending = !isRegister && requestError instanceof ApiError && requestError.status === 403 && requestError.code === "EMAIL_VERIFICATION_REQUIRED";
+      setVerificationRequired(pending);
+      setError(pending ? "Please verify your email before logging in." : requestError instanceof Error ? requestError.message : "Unable to authenticate");
     } finally {
       setSubmitting(false);
     }
@@ -50,6 +57,8 @@ export default function PlayerAuth() {
             {isRegister ? "Create your player account to track matches." : "Sign in to continue to your matches."}
           </p>
         </div>
+
+        {!isRegister && (location.state as { emailVerified?: boolean } | null)?.emailVerified === true ? <p role="status" className="text-sm text-emerald-300">Email verified. Log in to continue.</p> : null}
 
         <form className="mt-6 space-y-4" onSubmit={submit}>
           {isRegister ? (
@@ -78,7 +87,10 @@ export default function PlayerAuth() {
             <input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="mt-2 h-12 w-full rounded-[10px] border border-white/10 bg-[#f4f3f8] px-3 text-slate-900 outline-none focus:border-[#6a9eff] focus:ring-2 focus:ring-[#6a9eff]/30" autoComplete={isRegister ? "new-password" : "current-password"} />
           </label>
 
+          {!isRegister ? <div className="text-right"><Link to="/forgot-password" className="text-sm text-[#8db0ff] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">Forgot Password?</Link></div> : null}
+
           {error ? <p className="text-sm text-red-300" role="alert">{error}</p> : null}
+          {!isRegister && verificationRequired ? <Link to="/verify-email" className="inline-block text-sm text-[#8db0ff] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">Verify your email</Link> : null}
 
           <button type="submit" disabled={submitting} className="w-full rounded-[10px] bg-[#454ec3] px-6 py-3 font-semibold text-white transition hover:brightness-110 disabled:cursor-wait disabled:opacity-60">
             {submitting ? "Working..." : isRegister ? "Create account" : "Log in"}

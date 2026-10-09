@@ -1,6 +1,8 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import PlayerAuth from "./components/PlayerAuth";
+import ForgotPassword from "./pages/ForgotPassword";
+import VerifyEmail from "./pages/VerifyEmail";
 import { mockMatchConfig } from "./lib/mockData";
 import { usePlayerAuth } from "./lib/PlayerAuthContext";
 import Achievements from "./pages/Achievements";
@@ -69,6 +71,8 @@ export default function App() {
       <Route path="/welcome" element={<Welcome />} />
       <Route path="/login" element={<PlayerAuth />} />
       <Route path="/register" element={<PlayerAuth />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
 
       <Route path="/app/*" element={<ProtectedApp />}>
         <Route index element={<DashboardRoute />} />

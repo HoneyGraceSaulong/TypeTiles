@@ -25,6 +25,7 @@ export async function initializeDatabase(): Promise<Database> {
   });
 
   await db.exec("PRAGMA foreign_keys = ON");
+  await db.exec("PRAGMA busy_timeout = 5000");
   await db.exec("PRAGMA journal_mode = WAL");
 
   // Create tables
@@ -55,6 +56,62 @@ async function createTables(db: Database) {
   if (!userColumns.some((column) => column.name === "background")) {
     await db.exec("ALTER TABLE users ADD COLUMN background TEXT");
   }
+  if (!userColumns.some((column) => column.name === "session_version")) {
+    await db.exec("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0");
+  }
+  // Recheck under a write lock: only the first successful migration accepts legacy rows.
+  await db.exec("BEGIN IMMEDIATE");
+  try {
+    const columns = await db.all<{ name: string }[]>("PRAGMA table_info(users)");
+    const firstMigration = !columns.some((column) => column.name === "email_verified");
+    if (firstMigration) await db.exec("ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0");
+    if (!columns.some((column) => column.name === "email_verified_at")) {
+      await db.exec("ALTER TABLE users ADD COLUMN email_verified_at INTEGER");
+    }
+    if (firstMigration) await db.exec("UPDATE users SET email_verified = 1, email_verified_at = NULL");
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS email_verification_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        code_hash TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        consumed_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS email_verification_user_created ON email_verification_codes(user_id, created_at);
+      CREATE TABLE IF NOT EXISTS email_verification_rate_limits (
+        key TEXT PRIMARY KEY,
+        window_start INTEGER NOT NULL,
+        count INTEGER NOT NULL,
+        last_request INTEGER NOT NULL
+      );
+    `);
+    await db.exec("COMMIT");
+  } catch (error) {
+    await db.exec("ROLLBACK");
+    throw error;
+  }
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS password_reset_codes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      consumed_at INTEGER,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS password_reset_user_created ON password_reset_codes(user_id, created_at);
+    CREATE TABLE IF NOT EXISTS password_reset_rate_limits (
+      key TEXT PRIMARY KEY,
+      window_start INTEGER NOT NULL,
+      count INTEGER NOT NULL,
+      last_request INTEGER NOT NULL
+    );
+  `);
 
   // User stats table
   await db.exec(`

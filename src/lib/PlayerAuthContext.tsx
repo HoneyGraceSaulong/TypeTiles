@@ -8,6 +8,7 @@ import {
   updatePlayerProfile,
   type PlayerStats,
   type PlayerUser,
+  type RegistrationResponse,
 } from "./playerApi";
 
 type RegisterInput = {
@@ -22,7 +23,10 @@ type PlayerAuthContextValue = {
   stats: PlayerStats | null;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
+  register: (input: RegisterInput) => Promise<RegistrationResponse>;
+  verificationEmail: string;
+  verificationResendAt: number;
+  clearPendingVerification: () => void;
   updateProfile: (input: { displayName?: string; avatar?: string; background?: string }) => Promise<void>;
   logout: () => void;
 };
@@ -33,6 +37,9 @@ export function PlayerAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<PlayerUser | null>(null);
   const [stats, setStats] = useState<PlayerStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // Navigation aid only, held in memory. Refresh/direct visits allow manual email entry.
+  const [verificationEmail, setVerificationEmail] = useState("");
+  const [verificationResendAt, setVerificationResendAt] = useState(0);
 
   useEffect(() => {
     const token = localStorage.getItem(PLAYER_TOKEN_KEY);
@@ -59,6 +66,9 @@ export function PlayerAuthProvider({ children }: { children: ReactNode }) {
       user,
       stats,
       isLoading,
+      verificationEmail,
+      verificationResendAt,
+      clearPendingVerification: () => { setVerificationEmail(""); setVerificationResendAt(0); },
       login: async (username, password) => {
         const response = await loginPlayer(username, password);
         localStorage.setItem(PLAYER_TOKEN_KEY, response.token);
@@ -67,9 +77,10 @@ export function PlayerAuthProvider({ children }: { children: ReactNode }) {
       },
       register: async (input) => {
         const response = await registerPlayer(input);
-        localStorage.setItem(PLAYER_TOKEN_KEY, response.token);
-        setUser(response.user);
-        setStats(null);
+        if (response.verificationRequired !== true) throw new Error("Unable to complete registration");
+        setVerificationEmail(input.email.trim().toLowerCase());
+        setVerificationResendAt(Date.now() + 60_000);
+        return response;
       },
       updateProfile: async (input) => {
         const response = await updatePlayerProfile(input);
@@ -81,7 +92,7 @@ export function PlayerAuthProvider({ children }: { children: ReactNode }) {
         setStats(null);
       },
     }),
-    [isLoading, stats, user],
+    [isLoading, stats, user, verificationEmail, verificationResendAt],
   );
 
   return <PlayerAuthContext.Provider value={value}>{children}</PlayerAuthContext.Provider>;

@@ -53,3 +53,16 @@ export function passwordResetEmailTemplate(verificationCode: string): Omit<Email
 export function sendPasswordResetEmail(to: string, verificationCode: string): Promise<{ id: string }> {
   return sendEmail({ to, ...passwordResetEmailTemplate(verificationCode) });
 }
+
+export function emailVerificationTemplate(code: string): Omit<EmailMessage, "to"> {
+  if (!/^\d{6}$/.test(code)) throw new Error("A six-digit verification code is required.");
+  return {
+    subject: "Verify your Type Tiles email",
+    text: `Welcome to Type Tiles! Your email verification code is: ${code}\n\nThis code expires in 10 minutes. Do not share it. If you did not create an account, ignore this email.`,
+    html: `<div style="font-family:Arial,sans-serif;background:#08122e;color:#ffffff;padding:32px"><h1 style="color:#8db0ff">Type Tiles</h1><h2>Verify your email</h2><p>Use this code to complete your account registration:</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${escapeHtml(code)}</p><p>This code expires in 10 minutes. Do not share it.</p><p>If you did not create an account, ignore this email.</p></div>`,
+  };
+}
+
+export function sendEmailVerificationCode(to: string, code: string): Promise<{ id: string }> {
+  return sendEmail({ to, ...emailVerificationTemplate(code) });
+}

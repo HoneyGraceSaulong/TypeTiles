@@ -9,6 +9,9 @@ import leaderboardRoutes from "./routes/leaderboard.js";
 import adminRoutes from "./routes/admin.js";
 import feedbackRoutes from "./routes/feedback.js";
 import { attachLanServer } from "./lan.js";
+import { jwtSecret } from "./auth.js";
+import { resetSecret } from "./passwordReset.js";
+import { verificationSecret } from "./emailVerification.js";
 
 const app = express();
 const httpServer = createServer(app);
@@ -73,6 +76,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Start server
 async function start() {
   try {
+    jwtSecret();
+    resetSecret();
+    verificationSecret();
     await initializeDatabase();
     console.log("✓ Database initialized");
 

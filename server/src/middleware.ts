@@ -26,11 +26,11 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
 
   try {
     const user = await getDatabase().get(
-      "SELECT id, username, role, is_banned FROM users WHERE id = ?",
+      "SELECT id, username, role, is_banned, session_version, email_verified FROM users WHERE id = ?",
       [payload.userId],
     );
 
-    if (!user || user.is_banned) {
+    if (!user || user.is_banned || user.email_verified !== 1 || (payload.sessionVersion ?? 0) !== user.session_version) {
       return res.status(401).json({ error: "Invalid or inactive account" });
     }
 
@@ -38,6 +38,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
       userId: user.id,
       username: user.username,
       role: normalizeRole(user.role),
+      sessionVersion: user.session_version,
     };
     next();
   } catch (error) {

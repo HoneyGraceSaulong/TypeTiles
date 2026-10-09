@@ -1,9 +1,15 @@
 import { Router, Request, Response } from "express";
 import { getDatabase } from "../db.js";
-import { hashPassword, verifyPassword, generateToken, normalizeRole } from "../auth.js";
+import { verifyPassword, generateToken, normalizeRole } from "../auth.js";
 import { authMiddleware } from "../middleware.js";
+import { createPasswordResetRouter } from "./passwordReset.js";
+import { EmailVerificationService, RegistrationError } from "../emailVerification.js";
+import { createEmailVerificationRouter } from "./emailVerification.js";
 
+export function createAuthRouter(verification = new EmailVerificationService()) {
 const router = Router();
+router.use(createPasswordResetRouter());
+router.use(createEmailVerificationRouter(verification));
 
 interface RegisterBody {
   username: string;
@@ -26,80 +32,32 @@ interface ProfileUpdateBody {
 const AVATAR_IDS = new Set(["hani", "helen", "jacq", "kyla", "liscano"]);
 const BACKGROUND_IDS = new Set(["blues", "volts", "office", "city"]);
 
-// Register
+// Register: pending account only; verification never creates a session.
 router.post("/register", async (req: Request<{}, {}, RegisterBody>, res: Response) => {
+  res.set("Cache-Control", "no-store");
   try {
-    const { username, email, password, displayName } = req.body;
-
-    if (!username || !email || !password || !displayName) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
-    }
-
-    const db = getDatabase();
-
-    // Check if user exists
-    const existing = await db.get("SELECT id FROM users WHERE username = ? OR email = ?", [username, email]);
-    if (existing) {
-      return res.status(409).json({ error: "Username or email already taken" });
-    }
-
-    const passwordHash = await hashPassword(password);
-
-    const result = await db.run(
-      `INSERT INTO users (username, email, password_hash, display_name) VALUES (?, ?, ?, ?)`,
-      [username, email, passwordHash, displayName]
-    );
-
-    const userId = result.lastID;
-    if (typeof userId !== "number") {
-      throw new Error("User registration did not return an ID");
-    }
-
-    // Create user stats entry
-    await db.run(`INSERT INTO user_stats (user_id) VALUES (?)`, [userId]);
-
-    // Generate token
-    const token = generateToken({
-      userId,
-      username,
-      role: "student",
-    });
-
-    res.status(201).json({
-      message: "User registered successfully",
-      token,
-      user: {
-        id: userId,
-        username,
-        email,
-        displayName,
-        tier: "Volt",
-        role: "student",
-      },
-    });
+    await verification.register(req.body, req.ip || "unknown");
+    return res.status(201).json({ message: "Account created. Verify your email before logging in.", verificationRequired: true });
   } catch (error) {
-    console.error("Registration error:", error);
-    res.status(500).json({ error: "Internal server error" });
+    if (error instanceof RegistrationError) return res.status(error.status).json({ error: error.message });
+    console.warn("Registration could not be completed.");
+    return res.status(503).json({ error: "Registration is temporarily unavailable." });
   }
 });
 
 // Login
 router.post("/login", async (req: Request<{}, {}, LoginBody>, res: Response) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = req.body ?? {};
 
-    if (!username || !password) {
+    if (typeof username !== "string" || typeof password !== "string" || !username || !password) {
       return res.status(400).json({ error: "Missing username or password" });
     }
 
     const db = getDatabase();
 
     const user = await db.get(
-      `SELECT id, username, email, password_hash, display_name, avatar, background, tier, role, is_banned FROM users WHERE username = ?`,
+      `SELECT id, username, email, password_hash, display_name, avatar, background, tier, role, is_banned, session_version, email_verified FROM users WHERE username = ?`,
       [username]
     );
 
@@ -117,10 +75,15 @@ router.post("/login", async (req: Request<{}, {}, LoginBody>, res: Response) => 
       return res.status(401).json({ error: "Invalid username or password" });
     }
 
+    if (user.email_verified !== 1) {
+      return res.status(403).json({ error: "Verify your email before logging in.", code: "EMAIL_VERIFICATION_REQUIRED" });
+    }
+
     const token = generateToken({
       userId: user.id,
       username: user.username,
       role: normalizeRole(user.role),
+      sessionVersion: user.session_version,
     });
 
     res.json({
@@ -239,4 +202,7 @@ router.put("/me/profile", authMiddleware, async (req: Request<{}, {}, ProfileUpd
   }
 });
 
-export default router;
+return router;
+}
+
+export default createAuthRouter();
