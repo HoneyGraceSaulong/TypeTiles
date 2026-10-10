@@ -1,6 +1,6 @@
 import { Settings } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { usePlayerAuth } from "../lib/PlayerAuthContext";
 import { getProfileAvatar, getProfileBackground, PROFILE_AVATARS, PROFILE_BACKGROUNDS, type ProfileAvatarId, type ProfileBackgroundId } from "../lib/profileAssets";
 
@@ -72,6 +72,12 @@ export default function Customize() {
           >
             <img alt={`${currentAvatar.label} avatar preview`} src={currentAvatar.source} className="h-[150px] w-[150px] rounded-full object-cover" />
           </div>
+
+          {user?.role === "student" && (
+            <Link to="/app/word-bank" className="my-4 inline-flex rounded-[8px] border border-[#2967a1] bg-[#2746a6] px-5 py-3 font-medium text-white transition hover:bg-[#233f9d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#6a9eff]">
+              Word Bank
+            </Link>
+          )}
 
           <div className="mt-2 flex h-[59px] rounded-[8px] border border-[#2967a1] bg-[#1d234a]">
             <button type="button" onClick={() => setTab("avatar")} className={`relative flex-1 rounded-[8px] text-[18px] font-medium text-white ${tab === "avatar" ? "bg-[rgba(23,54,112,.7)] after:absolute after:bottom-[-8px] after:left-0 after:right-0 after:h-2 after:rounded-[8px] after:bg-[#6a9eff]" : ""}`} aria-selected={tab === "avatar"}>AVATAR</button>

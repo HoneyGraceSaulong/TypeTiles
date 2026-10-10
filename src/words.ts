@@ -9,7 +9,7 @@ export {
 } from "../server/src/wordBank";
 export type { GreggPrompt, WordCategory } from "../server/src/wordBank";
 
-import { WORD_BANK } from "../server/src/wordBank";
+import { GREGG_PROMPTS, WORD_BANK } from "../server/src/wordBank";
 
 export const WORDS: string[] = Object.values(WORD_BANK).flat();
 

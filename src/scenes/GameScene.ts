@@ -5,6 +5,7 @@ import { getLaneX, pickLaneNotSame, type Lane } from "./game/lanes";
 import { WaterEffects, WATER_TEXTURE_KEY } from "./game/WaterEffects";
 import { WordTarget } from "./game/WordTarget";
 import type { MatchConfig } from "../lib/mockData";
+import { getSoloGreggPrompts, isGreggStenographyCategory } from "../data/greggPrompts";
 
 export type GameResult = {
   score: number;
@@ -83,6 +84,10 @@ export default class GameScene extends Phaser.Scene {
   private multiplayerWordIndex = 0;
   private wordDeck: string[] = [];
   private wordDeckIndex = 0;
+  private isSoloGregg = false;
+  private greggIndex = 0;
+  private greggPlayTop = 144;
+  private greggPlayBottom = 0;
 
   private activeWord = "";
   private typedText = "";
@@ -118,7 +123,15 @@ export default class GameScene extends Phaser.Scene {
     this.matchDurationSeconds = matchConfig.roundTime;
     this.remainingSeconds = this.matchDurationSeconds;
     this.difficultyKey = this.getDifficultyKey(matchConfig.difficulty);
+    this.isSoloGregg = mode === "solo" && isGreggStenographyCategory(matchConfig.wordSet);
+    this.greggIndex = 0;
     this.wordCategory = getWordCategory(matchConfig.wordSet);
+    if (this.isSoloGregg) {
+      this.wordDeck = [];
+      this.wordDeckIndex = 0;
+      this.fallSpeedPxPerSec = GameScene.DIFFICULTY_CONFIG[this.difficultyKey].fallSpeed;
+      return;
+    }
     const preferredWords = [...new Set(getWordsForDifficulty(this.wordCategory, this.difficultyKey))];
     const preferredWordSet = new Set(preferredWords);
     const remainingCategoryWords = WORD_BANK[this.wordCategory].filter((word) => !preferredWordSet.has(word));
@@ -134,7 +147,13 @@ export default class GameScene extends Phaser.Scene {
       frameHeight: this.WATER_FRAME_SIZE,
     });
 
-    if (this.wordCategory === "stenography") {
+    if (this.isSoloGregg) {
+      for (const prompt of getSoloGreggPrompts()) {
+        const key = this.greggTextureKey(prompt.id);
+        if (!this.textures.exists(key)) this.load.image(key, prompt.image);
+      }
+      // create() checks every required texture after loading, including failed requests.
+    } else if (this.wordCategory === "stenography") {
       for (const prompt of GREGG_PROMPTS) {
         this.load.image(prompt.id, prompt.image);
       }
@@ -209,7 +228,7 @@ export default class GameScene extends Phaser.Scene {
       tilePaddingX: this.TILE_PADDING_X,
     });
 
-    if (this.wordCategory === "stenography" && GREGG_PROMPTS.length === 0) {
+    if (!this.isSoloGregg && this.wordCategory === "stenography" && GREGG_PROMPTS.length === 0) {
       this.gameOverDisplay
         .setText("Gregg shorthand assets are not available yet.")
         .setVisible(true);
@@ -217,27 +236,42 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
 
+    if (this.isSoloGregg) this.layoutGreggInput();
     this.spawnWord();
     this.updateHud();
     this.reportPerformance();
 
-    this.input.keyboard?.on("keydown", (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (this.isSoloGregg && (event.ctrlKey || event.metaKey || event.altKey || event.isComposing)) return;
       if (event.key === "Escape") {
         this.pauseMenu.toggle();
         return;
       }
 
+      if (this.isSoloGregg && (event.key.length === 1 || event.key === "Backspace")) event.preventDefault();
       this.handleTyping(event.key);
-    });
+    };
+    this.input.keyboard?.on("keydown", onKeyDown);
 
-    this.scale.on("resize", (gameSize: Phaser.Structs.Size) => {
+    const onResize = (gameSize: Phaser.Structs.Size) => {
       this.typedDisplay.setPosition(gameSize.width / 2, gameSize.height - 80);
       this.gameOverDisplay.setPosition(gameSize.width / 2, gameSize.height / 2);
       this.pauseMenu.layout(gameSize.width, gameSize.height);
       this.layoutHud();
 
+      if (this.isSoloGregg) {
+        this.layoutGreggInput();
+        if (!this.gameOver) this.layoutGreggTarget(false);
+        return;
+      }
+
       this.wordX = getLaneX(gameSize.width, this.lastLane);
       this.wordTarget.setPosition(this.wordX, this.wordY);
+    };
+    this.scale.on("resize", onResize);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.keyboard?.off("keydown", onKeyDown);
+      this.scale.off("resize", onResize);
     });
   }
 
@@ -255,16 +289,34 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.wordY += this.fallSpeedPxPerSec * dt;
+    const bottomLimit = this.isSoloGregg
+      ? this.greggPlayBottom - this.wordTarget.height / 2
+      : this.scale.height - 120;
+    this.wordY = this.isSoloGregg
+      ? Math.min(bottomLimit, this.wordY + this.fallSpeedPxPerSec * dt)
+      : this.wordY + this.fallSpeedPxPerSec * dt;
     this.wordTarget.setPosition(this.wordX, this.wordY);
 
-    const bottomLimit = this.scale.height - 120;
     if (this.wordY >= bottomLimit) {
       this.onMissBottom();
     }
   }
 
   private spawnWord(): void {
+    if (this.isSoloGregg) {
+      const prompts = getSoloGreggPrompts();
+      if (!prompts.length || prompts.some((prompt) => !this.textures.exists(this.greggTextureKey(prompt.id)))) {
+        this.showGreggUnavailable("Gregg shorthand content could not be loaded. Please restart or exit.");
+        return;
+      }
+      const prompt = prompts[this.greggIndex % prompts.length];
+      this.greggIndex += 1;
+      this.activeWord = prompt.answer;
+      this.typedText = "";
+      this.typedDisplay.setText("").setColor("#ffff00");
+      this.layoutGreggTarget(true);
+      return;
+    }
     const hasMultiplayerSequence = this.gameMode === "multiplayer" && this.multiplayerWordSequence.length > 0;
     if (!hasMultiplayerSequence && this.wordDeckIndex >= this.wordDeck.length && this.wordDeck.length > 0) {
       this.wordDeck = this.shuffleWords(this.wordDeck, this.activeWord);
@@ -321,6 +373,58 @@ export default class GameScene extends Phaser.Scene {
       [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
     }
     return shuffled;
+  }
+
+  private greggTextureKey(id: string): string {
+    return `solo-gregg-${id}`;
+  }
+
+  private showGreggUnavailable(message: string): void {
+    this.gameOver = true;
+    this.wordTarget.hide();
+    this.gameOverDisplay.setFontSize(18).setWordWrapWidth(Math.max(1, this.scale.width - 64), true)
+      .setText(message).setVisible(true);
+  }
+
+  private layoutGreggInput(): void {
+    const width = Math.max(1, this.scale.width - 48);
+    const currentText = this.typedText;
+    this.typedDisplay.setFontSize(this.scale.width < 480 ? 14 : 18)
+      .setWordWrapWidth(width, true).setOrigin(0.5, 0);
+    // Reserve enough space for any sentence so the falling boundary does not move while typing.
+    let maxHeight = 0;
+    for (const prompt of getSoloGreggPrompts()) {
+      this.typedDisplay.setText(prompt.answer);
+      maxHeight = Math.max(maxHeight, this.typedDisplay.height);
+    }
+    const inputTop = this.scale.height - maxHeight - 16;
+    this.typedDisplay.setText(currentText).setPosition(this.scale.width / 2, inputTop);
+    this.greggPlayBottom = inputTop - 16;
+  }
+
+  private layoutGreggTarget(resetPosition: boolean): void {
+    const prompt = getSoloGreggPrompts().find((item) => item.answer === this.activeWord);
+    if (!prompt) return;
+    const availableHeight = this.greggPlayBottom - this.greggPlayTop;
+    if (availableHeight < 160 || this.scale.width < 240) {
+      this.showGreggUnavailable("The game area is too small for Gregg exercises. Enlarge it and restart.");
+      return;
+    }
+    this.wordX = this.scale.width / 2;
+    const fits = this.wordTarget.setSoloGreggImage(this.greggTextureKey(prompt.id), prompt.answer,
+      this.wordX, this.wordY, Math.min(350, this.scale.width - 32), Math.min(260, availableHeight * 0.65));
+    if (!fits) {
+      this.showGreggUnavailable("The game area is too small for Gregg exercises. Enlarge it and restart.");
+      return;
+    }
+    const top = this.greggPlayTop + this.wordTarget.height / 2;
+    const bottom = this.greggPlayBottom - this.wordTarget.height / 2;
+    if (top >= bottom) {
+      this.showGreggUnavailable("The game area is too small for Gregg exercises. Enlarge it and restart.");
+      return;
+    }
+    this.wordY = resetPosition ? top : Phaser.Math.Clamp(this.wordY, top, bottom);
+    this.wordTarget.setPosition(this.wordX, this.wordY);
   }
 
   private handleTyping(key: string): void {
@@ -391,6 +495,12 @@ export default class GameScene extends Phaser.Scene {
 
     this.cameras.main.shake(80, 0.003);
 
+    if (this.isSoloGregg) {
+      this.typedText = this.typedText.slice(0, -1);
+      this.typedDisplay.setText(this.typedText).setColor("#ff665f");
+      return;
+    }
+
     this.typedText = "";
     this.typedDisplay.setText("");
     this.typedDisplay.setColor("#ffff00");
@@ -433,6 +543,22 @@ export default class GameScene extends Phaser.Scene {
   }
 
   private layoutHud(): void {
+    if (this.isSoloGregg) {
+      this.topHudPanel.setPosition(0, 0).setSize(this.scale.width, 58);
+      const topCellWidth = Math.max(0, this.scale.width - 112) / this.topHudMetrics.length;
+      this.topHudMetrics.forEach(({ label, value }, index) => {
+        label.setPosition(12 + index * topCellWidth, 7);
+        value.setPosition(12 + index * topCellWidth, 27);
+      });
+      const cellWidth = Math.max(1, (this.scale.width - 24) / this.hudMetrics.length);
+      this.hudPanel.setPosition(12, 72).setSize(this.scale.width - 24, 60);
+      this.hudMetrics.forEach(({ label, value }, index) => {
+        label.setFontSize(this.scale.width < 480 ? 10 : 14).setPosition(20 + index * cellWidth, 79);
+        value.setFontSize(this.scale.width < 480 ? 16 : 22).setPosition(20 + index * cellWidth, 101);
+      });
+      this.hudDividers.forEach((divider) => divider.setVisible(false));
+      return;
+    }
     const left = 12;
     const top = 72;
     const width = Math.min(156, Math.max(126, this.scale.width * 0.24));
