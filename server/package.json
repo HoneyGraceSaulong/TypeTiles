@@ -6,6 +6,8 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:verification-test": "tsx scripts/verificationTestDb.ts",
+    "db:verification-test:init": "tsx scripts/verificationTestDb.ts --init",
     "build": "tsc",
     "start": "node dist/index.js",
     "db:reset": "node scripts/resetDb.js",
